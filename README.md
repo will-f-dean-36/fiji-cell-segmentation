@@ -8,6 +8,7 @@ In active development
 ## Build
 ```bash
 mvn -DskipTests package
+```
 
 ## Install
 Copy the generated JAR from `target/` into Fiji `plugins/`
