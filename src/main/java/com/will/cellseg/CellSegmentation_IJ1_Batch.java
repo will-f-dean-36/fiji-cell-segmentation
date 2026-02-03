@@ -13,11 +13,22 @@ public class CellSegmentation_IJ1_Batch implements PlugIn {
 
     @Override
     public void run(String arg) {
+
+        IJ.log("[CellSegmentation IJ1 Batch] Starting...");
+        // Update log with path to JAR
+        IJ.log("[CellSegmentation IJ1 Batch] run() jar=" + getClass().getProtectionDomain().getCodeSource().getLocation());
+
+
         File[] files = chooseInputFiles();
         if (files == null || files.length == 0) return;
 
+        // Update log with number of files selected
+        IJ.log("[CellSegmentation IJ1 Batch] Selected " + files.length + " file(s)");
+
         File outDir = chooseOutputDir();
         if (outDir == null) return;
+
+        IJ.log("[CellSegmentation IJ1 Batch] Output directory: " + outDir.getAbsolutePath());
 
         final Context context = IJ1Helper.getLegacyContext();
         final CommandService cs = context.service(CommandService.class);
