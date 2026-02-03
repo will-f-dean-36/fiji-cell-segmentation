@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+		 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<parent>
+		<groupId>org.scijava</groupId>
+		<artifactId>pom-scijava</artifactId>
+		<version>43.0.0</version>
+		<relativePath/>
+	</parent>
+
+	<groupId>com.will.cellseg</groupId>
+	<artifactId>cell-segmentation</artifactId>
+	<version>0.1.0-SNAPSHOT</version>
+
+	<name>Fiji Cell Segmentation</name>
+	<description>Segments cells using edge detection, thresholding, and watershed, then outputs descriptive statistics for each ROI.</description>
+	<url>https://github.com/will-f-dean-36/fiji-cell-segmentation</url>
+	<inceptionYear>2026</inceptionYear>
+
+	<organization>
+		<name>Will</name>
+		<url>https://github.com/will-f-dean-36</url>
+	</organization>
+
+	<licenses>
+		<license>
+			<name>Simplified BSD License</name>
+			<distribution>repo</distribution>
+		</license>
+	</licenses>
+
+	<developers>
+		<developer>
+			<id>will</id>
+			<name>Will</name>
+			<url>https://imagej.net/User:will</url>
+			<roles>
+				<role>founder</role>
+				<role>lead</role>
+				<role>developer</role>
+				<role>debugger</role>
+				<role>reviewer</role>
+				<role>support</role>
+				<role>maintainer</role>
+			</roles>
+		</developer>
+	</developers>
+
+	<contributors>
+		<contributor>
+			<name>Will</name>
+		</contributor>
+	</contributors>
+
+	<ciManagement>
+		<system>None</system>
+	</ciManagement>
+
+	<mailingLists>
+		<mailingList>
+			<name>ImageJ Forum</name>
+			<archive>https://forum.image.sc/</archive>
+		</mailingList>
+	</mailingLists>
+
+	<scm>
+		<connection>scm:git:git://github.com/will-f-dean-36/fiji-cell-segmentation</connection>
+		<developerConnection>scm:git:git@github.com:will-f-dean-36/fiji-cell-segmentation</developerConnection>
+		<tag>HEAD</tag>
+		<url>https://github.com/will-f-dean-36/fiji-cell-segmentation</url>
+	</scm>
+
+	<issueManagement>
+		<system>GitHub Issues</system>
+		<url>https://github.com/will-f-dean-36/fiji-cell-segmentation/issues</url>
+	</issueManagement>
+
+	<properties>
+		<package-name>com.will.cellseg</package-name>
+		<main-class>com.will.cellseg.CellSegmentationCommand</main-class>
+
+		<!-- Fiji compatibility -->
+		<maven.compiler.release>8</maven.compiler.release>
+
+		<!-- Required by pom-scijava enforcer -->
+		<license.licenseName>bsd_2</license.licenseName>
+		<license.copyrightOwners>Will</license.copyrightOwners>
+
+	</properties>
+
+	<!-- Usually not needed: pom-scijava + Central covers most things.
+         If you do need SciJava public, this is the canonical URL. -->
+	<repositories>
+		<repository>
+			<id>scijava.public</id>
+			<url>https://maven.scijava.org/content/groups/public</url>
+		</repository>
+	</repositories>
+
+	<dependencies>
+		<dependency>
+			<groupId>net.imagej</groupId>
+			<artifactId>imagej</artifactId>
+		</dependency>
+
+		<!-- Needed for IJ1Helper in the classic menu wrapper -->
+		<dependency>
+			<groupId>net.imagej</groupId>
+			<artifactId>imagej-legacy</artifactId>
+		</dependency>
+	</dependencies>
+
+</project>
