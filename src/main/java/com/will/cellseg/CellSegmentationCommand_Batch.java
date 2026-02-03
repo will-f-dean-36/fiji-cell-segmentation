@@ -120,14 +120,18 @@ public class CellSegmentationCommand_Batch implements Command {
             return;
         }
 
-        EdgeDetector edgeDetector = EdgeDetector.fromLabel(edgeMethod);
+        IJ.log("[CellSegmentation Batch] Starting. Files=" + inputFiles.length);
+        IJ.log("[CellSegmentation Batch] Output dir: " + outputDir.getAbsolutePath());
+
+        final EdgeDetector edgeDetector = EdgeDetector.fromLabel(edgeMethod);
+
         int measurements = buildMeasurementFlags();
         if (measurements == 0) {
             measurements = ij.measure.Measurements.AREA;
-            IJ.log("No measurements selected; defaulting to Area.");
+            IJ.log("[CellSegmentation Batch] No measurements selected; defaulting to Area.");
         }
 
-        CellSegmentationParams p = new CellSegmentationParams(
+        final CellSegmentationParams p = new CellSegmentationParams(
                 minArea,
                 thrMethod,
                 darkObjects,
@@ -142,47 +146,169 @@ public class CellSegmentationCommand_Batch implements Command {
                 false
         );
 
-        for (File file : inputFiles) {
-            if (file == null) continue;
-            String path = file.getAbsolutePath();
-            ImagePlus imp = IJ.openImage(path);
-            if (imp == null) {
-                IJ.log("Skipping (failed to open): " + path);
+        int processed = 0;
+        int skipped = 0;
+        int failed = 0;
+
+        final int n = inputFiles.length;
+
+        for (int i = 0; i < n; i++) {
+            final File file = inputFiles[i];
+            if (file == null) {
+                skipped++;
+                continue;
+            }
+            if (!file.isFile()) {
+                IJ.log("[CellSegmentation Batch] Skipping (not a file): " + file);
+                skipped++;
                 continue;
             }
 
-            CellSegmentationResult r = CellSegmentationPipeline.run(imp, p);
-            String baseName = stripExtension(file.getName());
+            final String path = file.getAbsolutePath();
+            final String baseName = stripExtension(file.getName());
 
-            if (saveMask && r.mask != null) {
-                saveImage(r.mask, new File(outputDir, baseName + "_mask.tif"));
-            }
-            if (saveLabels && r.labels != null) {
-                saveImage(r.labels, new File(outputDir, baseName + "_labels.tif"));
-            }
-            if (saveLabelOverlay && r.labels != null) {
-                ImagePlus overlay = CellSegmentationPipeline.createLabelOverlay(imp, r.labels, labelsLut);
-                if (overlay != null) {
-                    saveImage(overlay, new File(outputDir, baseName + "_overlay.tif"));
-                    closeImage(overlay);
+            ImagePlus imp = null;
+            ImagePlus overlay = null;
+            CellSegmentationResult r = null;
+
+            try {
+                IJ.showStatus("Cell Segmentation: " + file.getName());
+                IJ.showProgress(i, n);
+
+                imp = IJ.openImage(path);
+                if (imp == null) {
+                    IJ.log("[CellSegmentation Batch] Skipping (failed to open): " + path);
+                    skipped++;
+                    continue;
                 }
-            }
-            if (saveRois && r.roiManager != null) {
-                File out = new File(outputDir, baseName + "_rois.zip");
-                r.roiManager.runCommand("Save", out.getAbsolutePath());
-            }
-            if (saveMeasurements && r.resultsTable != null) {
-                File out = new File(outputDir, baseName + "_measurements.csv");
-                r.resultsTable.save(out.getAbsolutePath());
-            }
 
-            closeImage(r.mask);
-            closeImage(r.labels);
-            closeImage(imp);
+                r = CellSegmentationPipeline.run(imp, p);
+
+                if (saveMask && r.mask != null) {
+                    saveImage(r.mask, new File(outputDir, baseName + "_mask.tif"));
+                }
+                if (saveLabels && r.labels != null) {
+                    saveImage(r.labels, new File(outputDir, baseName + "_labels.tif"));
+                }
+                if (saveLabelOverlay && r.labels != null) {
+                    overlay = CellSegmentationPipeline.createLabelOverlay(imp, r.labels, labelsLut);
+                    if (overlay != null) {
+                        saveImage(overlay, new File(outputDir, baseName + "_overlay.tif"));
+                    }
+                }
+                if (saveRois && r.roiManager != null) {
+                    File out = new File(outputDir, baseName + "_rois.zip");
+                    r.roiManager.runCommand("Save", out.getAbsolutePath());
+                }
+                if (saveMeasurements && r.resultsTable != null) {
+                    File out = new File(outputDir, baseName + "_measurements.csv");
+                    r.resultsTable.save(out.getAbsolutePath());
+                }
+
+                processed++;
+
+            } catch (Exception e) {
+                failed++;
+                IJ.log("[CellSegmentation Batch] ERROR processing: " + path);
+                IJ.handleException(e);
+
+            } finally {
+                // Always clean up, even if we continued/skipped/errored.
+                closeImage(overlay);
+                closeImage(r != null ? r.mask : null);
+                closeImage(r != null ? r.labels : null);
+                closeImage(imp);
+            }
         }
 
-        IJ.log("Batch Cell Segmentation complete.");
+        IJ.showProgress(1.0);
+        IJ.showStatus("Batch Cell Segmentation complete.");
+
+        IJ.log("[CellSegmentation Batch] Complete. processed=" + processed
+                + " skipped=" + skipped
+                + " failed=" + failed);
     }
+
+
+
+//    @Override
+//    public void run() {
+//        if (inputFiles == null || inputFiles.length == 0) {
+//            IJ.error("No input files selected.");
+//            return;
+//        }
+//        if (outputDir == null) {
+//            IJ.error("No output directory selected.");
+//            return;
+//        }
+//        if (!outputDir.exists() && !outputDir.mkdirs()) {
+//            IJ.error("Could not create output directory: " + outputDir.getAbsolutePath());
+//            return;
+//        }
+//
+//        EdgeDetector edgeDetector = EdgeDetector.fromLabel(edgeMethod);
+//        int measurements = buildMeasurementFlags();
+//        if (measurements == 0) {
+//            measurements = ij.measure.Measurements.AREA;
+//            IJ.log("No measurements selected; defaulting to Area.");
+//        }
+//
+//        CellSegmentationParams p = new CellSegmentationParams(
+//                minArea,
+//                thrMethod,
+//                darkObjects,
+//                false,
+//                false,
+//                false,
+//                true,
+//                edgeDetector,
+//                measurements,
+//                labelsLut,
+//                false,
+//                false
+//        );
+//
+//        for (File file : inputFiles) {
+//            if (file == null) continue;
+//            String path = file.getAbsolutePath();
+//            ImagePlus imp = IJ.openImage(path);
+//            if (imp == null) {
+//                IJ.log("Skipping (failed to open): " + path);
+//                continue;
+//            }
+//
+//            CellSegmentationResult r = CellSegmentationPipeline.run(imp, p);
+//            String baseName = stripExtension(file.getName());
+//
+//            if (saveMask && r.mask != null) {
+//                saveImage(r.mask, new File(outputDir, baseName + "_mask.tif"));
+//            }
+//            if (saveLabels && r.labels != null) {
+//                saveImage(r.labels, new File(outputDir, baseName + "_labels.tif"));
+//            }
+//            if (saveLabelOverlay && r.labels != null) {
+//                ImagePlus overlay = CellSegmentationPipeline.createLabelOverlay(imp, r.labels, labelsLut);
+//                if (overlay != null) {
+//                    saveImage(overlay, new File(outputDir, baseName + "_overlay.tif"));
+//                    closeImage(overlay);
+//                }
+//            }
+//            if (saveRois && r.roiManager != null) {
+//                File out = new File(outputDir, baseName + "_rois.zip");
+//                r.roiManager.runCommand("Save", out.getAbsolutePath());
+//            }
+//            if (saveMeasurements && r.resultsTable != null) {
+//                File out = new File(outputDir, baseName + "_measurements.csv");
+//                r.resultsTable.save(out.getAbsolutePath());
+//            }
+//
+//            closeImage(r.mask);
+//            closeImage(r.labels);
+//            closeImage(imp);
+//        }
+//
+//        IJ.log("Batch Cell Segmentation complete.");
+//    }
 
     private void editMeasurements() {
         GenericDialog gd = new GenericDialog("Measurements");
