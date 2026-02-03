@@ -1,4 +1,12 @@
-target/
+# IntelliJ
 .idea/
 *.iml
+
+# Maven
+target/
+
+# macOS
 .DS_Store
+
+# Common JVM noise
+*.log
