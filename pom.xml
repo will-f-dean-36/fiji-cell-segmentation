@@ -13,7 +13,7 @@
 
 	<groupId>com.will.cellseg</groupId>
 	<artifactId>cell-segmentation</artifactId>
-	<version>0.1.0-SNAPSHOT</version>
+	<version>0.1.0</version>
 
 	<name>Fiji Cell Segmentation</name>
 	<description>Segments cells using edge detection, thresholding, and watershed, then outputs descriptive statistics for each ROI.</description>
