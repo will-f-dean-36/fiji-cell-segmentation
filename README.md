@@ -15,7 +15,7 @@ Pre-built JARs are available on the [GitHub Releases](https://github.com/will-f-
 ### Install
 
 1. Download the latest release JAR
-2. Copy the JAR into your Fiji 'plugins/' directory
+2. Copy the JAR into your Fiji `plugins/` directory
 3. Restart Fiji
 
 ## Building from source
@@ -61,5 +61,5 @@ Runs the segmentation pipeline on a selected set of input images and writes outp
 
 ## Notes
 - This plugin is under active development; defaults and behavior may change between releases.
-- If the plugin does not appear after installation, verify the JAR is in the Fiji 'plugins/' directory and restart Fiji.
+- If the plugin does not appear after installation, verify the JAR is in the Fiji `plugins/` directory and restart Fiji.
 
