@@ -2,6 +2,7 @@ package com.will.cellseg;
 
 import ij.IJ;
 import ij.ImagePlus;
+import ij.Prefs;
 import ij.gui.GenericDialog;
 import ij.io.FileSaver;
 import java.io.File;
@@ -107,126 +108,138 @@ public class CellSegmentationCommand_Batch implements Command {
 
     @Override
     public void run() {
-        if (inputFiles == null || inputFiles.length == 0) {
-            IJ.error("No input files selected.");
-            return;
-        }
-        if (outputDir == null) {
-            IJ.error("No output directory selected.");
-            return;
-        }
-        if (!outputDir.exists() && !outputDir.mkdirs()) {
-            IJ.error("Could not create output directory: " + outputDir.getAbsolutePath());
-            return;
-        }
 
-        IJ.log("[CellSegmentation Batch] Starting. Files=" + inputFiles.length);
-        IJ.log("[CellSegmentation Batch] Output dir: " + outputDir.getAbsolutePath());
+        // Store global background polarity pref
+        final boolean prevBlackBg = Prefs.blackBackground;
 
-        final EdgeDetector edgeDetector = EdgeDetector.fromLabel(edgeMethod);
+        try {
+            // Ensure black defines background
+            Prefs.blackBackground = true;
 
-        int measurements = buildMeasurementFlags();
-        if (measurements == 0) {
-            measurements = ij.measure.Measurements.AREA;
-            IJ.log("[CellSegmentation Batch] No measurements selected; defaulting to Area.");
-        }
-
-        final CellSegmentationParams p = new CellSegmentationParams(
-                minArea,
-                thrMethod,
-                darkObjects,
-                false,
-                false,
-                false,
-                true,
-                edgeDetector,
-                measurements,
-                labelsLut,
-                false,
-                false
-        );
-
-        int processed = 0;
-        int skipped = 0;
-        int failed = 0;
-
-        final int n = inputFiles.length;
-
-        for (int i = 0; i < n; i++) {
-            final File file = inputFiles[i];
-            if (file == null) {
-                skipped++;
-                continue;
+            if (inputFiles == null || inputFiles.length == 0) {
+                IJ.error("No input files selected.");
+                return;
             }
-            if (!file.isFile()) {
-                IJ.log("[CellSegmentation Batch] Skipping (not a file): " + file);
-                skipped++;
-                continue;
+            if (outputDir == null) {
+                IJ.error("No output directory selected.");
+                return;
+            }
+            if (!outputDir.exists() && !outputDir.mkdirs()) {
+                IJ.error("Could not create output directory: " + outputDir.getAbsolutePath());
+                return;
             }
 
-            final String path = file.getAbsolutePath();
-            final String baseName = stripExtension(file.getName());
+            IJ.log("[CellSegmentation Batch] Starting. Files=" + inputFiles.length);
+            IJ.log("[CellSegmentation Batch] Output dir: " + outputDir.getAbsolutePath());
 
-            ImagePlus imp = null;
-            ImagePlus overlay = null;
-            CellSegmentationResult r = null;
+            final EdgeDetector edgeDetector = EdgeDetector.fromLabel(edgeMethod);
 
-            try {
-                IJ.showStatus("Cell Segmentation: " + file.getName());
-                IJ.showProgress(i, n);
+            int measurements = buildMeasurementFlags();
+            if (measurements == 0) {
+                measurements = ij.measure.Measurements.AREA;
+                IJ.log("[CellSegmentation Batch] No measurements selected; defaulting to Area.");
+            }
 
-                imp = IJ.openImage(path);
-                if (imp == null) {
-                    IJ.log("[CellSegmentation Batch] Skipping (failed to open): " + path);
+            final CellSegmentationParams p = new CellSegmentationParams(
+                    minArea,
+                    thrMethod,
+                    darkObjects,
+                    false,
+                    false,
+                    false,
+                    true,
+                    edgeDetector,
+                    measurements,
+                    labelsLut,
+                    false,
+                    false
+            );
+
+            int processed = 0;
+            int skipped = 0;
+            int failed = 0;
+
+            final int n = inputFiles.length;
+
+            for (int i = 0; i < n; i++) {
+                final File file = inputFiles[i];
+                if (file == null) {
+                    skipped++;
+                    continue;
+                }
+                if (!file.isFile()) {
+                    IJ.log("[CellSegmentation Batch] Skipping (not a file): " + file);
                     skipped++;
                     continue;
                 }
 
-                r = CellSegmentationPipeline.run(imp, p);
+                final String path = file.getAbsolutePath();
+                final String baseName = stripExtension(file.getName());
 
-                if (saveMask && r.mask != null) {
-                    saveImage(r.mask, new File(outputDir, baseName + "_mask.tif"));
-                }
-                if (saveLabels && r.labels != null) {
-                    saveImage(r.labels, new File(outputDir, baseName + "_labels.tif"));
-                }
-                if (saveLabelOverlay && r.labels != null) {
-                    overlay = CellSegmentationPipeline.createLabelOverlay(imp, r.labels, labelsLut);
-                    if (overlay != null) {
-                        saveImage(overlay, new File(outputDir, baseName + "_overlay.tif"));
+                ImagePlus imp = null;
+                ImagePlus overlay = null;
+                CellSegmentationResult r = null;
+
+                try {
+                    IJ.showStatus("Cell Segmentation: " + file.getName());
+                    IJ.showProgress(i, n);
+
+                    imp = IJ.openImage(path);
+                    if (imp == null) {
+                        IJ.log("[CellSegmentation Batch] Skipping (failed to open): " + path);
+                        skipped++;
+                        continue;
                     }
-                }
-                if (saveRois && r.roiManager != null) {
-                    File out = new File(outputDir, baseName + "_rois.zip");
-                    r.roiManager.runCommand("Save", out.getAbsolutePath());
-                }
-                if (saveMeasurements && r.resultsTable != null) {
-                    File out = new File(outputDir, baseName + "_measurements.csv");
-                    r.resultsTable.save(out.getAbsolutePath());
-                }
 
-                processed++;
+                    r = CellSegmentationPipeline.run(imp, p);
 
-            } catch (Exception e) {
-                failed++;
-                IJ.log("[CellSegmentation Batch] ERROR processing: " + path);
-                IJ.handleException(e);
+                    if (saveMask && r.mask != null) {
+                        saveImage(r.mask, new File(outputDir, baseName + "_mask.tif"));
+                    }
+                    if (saveLabels && r.labels != null) {
+                        saveImage(r.labels, new File(outputDir, baseName + "_labels.tif"));
+                    }
+                    if (saveLabelOverlay && r.labels != null) {
+                        overlay = CellSegmentationPipeline.createLabelOverlay(imp, r.labels, labelsLut);
+                        if (overlay != null) {
+                            saveImage(overlay, new File(outputDir, baseName + "_overlay.tif"));
+                        }
+                    }
+                    if (saveRois && r.roiManager != null) {
+                        File out = new File(outputDir, baseName + "_rois.zip");
+                        r.roiManager.runCommand("Save", out.getAbsolutePath());
+                    }
+                    if (saveMeasurements && r.resultsTable != null) {
+                        File out = new File(outputDir, baseName + "_measurements.csv");
+                        r.resultsTable.save(out.getAbsolutePath());
+                    }
 
-            } finally {
-                // Always clean up, even if we continued/skipped/errored.
-                closeImage(overlay);
-                closeImage(r != null ? r.mask : null);
-                closeImage(r != null ? r.labels : null);
-                closeImage(imp);
+                    processed++;
+
+                } catch (Exception e) {
+                    failed++;
+                    IJ.log("[CellSegmentation Batch] ERROR processing: " + path);
+                    IJ.handleException(e);
+
+                } finally {
+                    // Always clean up, even if we continued/skipped/errored.
+                    closeImage(overlay);
+                    closeImage(r != null ? r.mask : null);
+                    closeImage(r != null ? r.labels : null);
+                    closeImage(imp);
+                }
             }
+
+            IJ.showProgress(1.0);
+            IJ.showStatus("Batch Cell Segmentation complete.");
+
+            IJ.log("[CellSegmentation Batch] Done. processed=" + processed
+                    + " skipped=" + skipped
+                    + " failed=" + failed);
+        } finally {
+            // Restore background color pref
+            Prefs.blackBackground = prevBlackBg;
         }
-
-        IJ.showProgress(1.0);
-        IJ.showStatus("Batch Cell Segmentation complete.");
-
-        IJ.log("[CellSegmentation Batch] Complete. processed=" + processed
-                + " skipped=" + skipped
-                + " failed=" + failed);
     }
 
 

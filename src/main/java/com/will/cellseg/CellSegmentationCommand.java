@@ -3,6 +3,7 @@ package com.will.cellseg;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.gui.GenericDialog;
+import ij.Prefs;
 import org.scijava.command.Command;
 import org.scijava.plugin.Parameter;
 import org.scijava.plugin.Plugin;
@@ -109,7 +110,7 @@ public class CellSegmentationCommand implements Command {
         int measurements = buildMeasurementFlags();
         if (measurements == 0) {
             measurements = ij.measure.Measurements.AREA;
-            IJ.log("No measurements selected; defaulting to Area.");
+            IJ.log("[CellSegmentation] No measurements selected; defaulting to Area.");
         }
 
         // Bundle UI parameters for a single pipeline run.
@@ -128,12 +129,25 @@ public class CellSegmentationCommand implements Command {
                 true
         );
 
-        CellSegmentationResult r = CellSegmentationPipeline.run(imp, p);
+        // Store global background polarity pref
+        final boolean prevBlackBg = Prefs.blackBackground;
+        try {
+            // Ensure black defines background
+            Prefs.blackBackground = true;
 
-        if (r.mask != null) r.mask.show();
-        if (r.labels != null) r.labels.show();
+            // Run pipeline
+            CellSegmentationResult r = CellSegmentationPipeline.run(imp, p);
 
-        IJ.log("Cell Segmentation complete: " + r.roiCount + " ROIs");
+            if (r.mask != null) r.mask.show();
+            if (r.labels != null) r.labels.show();
+
+            IJ.log("[CellSegmentation] Done: " + r.roiCount + " ROIs");
+        } finally {
+            // Restore background color pref
+            Prefs.blackBackground = prevBlackBg;
+        }
+
+
     }
 
     private void editMeasurements() {

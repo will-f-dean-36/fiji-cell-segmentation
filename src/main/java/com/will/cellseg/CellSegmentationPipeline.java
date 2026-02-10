@@ -380,7 +380,6 @@ public final class CellSegmentationPipeline {
         return new ImagePlus("LabelsOverlay", new ColorProcessor(w, h, out));
     }
 
-
     private static void showStepSnapshot(ImagePlus img, String title, boolean show) {
         if (!show || img == null) return;
         ImagePlus snap = img.duplicate();
