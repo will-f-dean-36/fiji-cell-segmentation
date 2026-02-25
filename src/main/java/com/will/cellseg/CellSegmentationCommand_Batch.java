@@ -1,11 +1,26 @@
 package com.will.cellseg;
 
+import com.will.cellseg.batch.BioFormatsPlaneReader;
+import com.will.cellseg.batch.FrameSpec;
+import com.will.cellseg.batch.InputMode;
+import com.will.cellseg.batch.InputResolver;
+import com.will.cellseg.batch.MeasUnit;
+import com.will.cellseg.batch.MeasurementPlan;
+import com.will.cellseg.batch.PairedUnit;
+import com.will.cellseg.batch.SegUnit;
+import com.will.cellseg.batch.SeriesMetadata;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.Prefs;
 import ij.gui.GenericDialog;
+import ij.gui.Roi;
 import ij.io.FileSaver;
+import ij.measure.ResultsTable;
+import ij.plugin.filter.Analyzer;
+import ij.plugin.frame.RoiManager;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import org.scijava.ItemVisibility;
 import org.scijava.command.Command;
 import org.scijava.plugin.Parameter;
@@ -17,7 +32,31 @@ import org.scijava.widget.Button;
 public class CellSegmentationCommand_Batch implements Command {
 
     @Parameter(visibility = ItemVisibility.INVISIBLE)
-    private File[] inputFiles;
+    private String inputMode;
+
+    @Parameter(visibility = ItemVisibility.INVISIBLE, required = false)
+    private File ricmContainerFile;
+
+    @Parameter(visibility = ItemVisibility.INVISIBLE, required = false)
+    private File fluorContainerFile;
+
+    @Parameter(visibility = ItemVisibility.INVISIBLE, required = false)
+    private File[] ricmFiles;
+
+    @Parameter(visibility = ItemVisibility.INVISIBLE, required = false)
+    private File[] fluorFiles;
+
+    @Parameter(visibility = ItemVisibility.INVISIBLE, required = false)
+    private File[] combinedFiles;
+
+    @Parameter(visibility = ItemVisibility.INVISIBLE)
+    private int sameFileSegChannelIndex1Based = 1;
+
+    @Parameter(visibility = ItemVisibility.INVISIBLE)
+    private int sameFileFirstMeasChannelIndex1Based = 2;
+
+    @Parameter(visibility = ItemVisibility.INVISIBLE)
+    private boolean allTimepoints = true;
 
     @Parameter(visibility = ItemVisibility.INVISIBLE)
     private File outputDir;
@@ -109,17 +148,11 @@ public class CellSegmentationCommand_Batch implements Command {
     @Override
     public void run() {
 
-        // Store global background polarity pref
         final boolean prevBlackBg = Prefs.blackBackground;
 
         try {
-            // Ensure black defines background
             Prefs.blackBackground = true;
 
-            if (inputFiles == null || inputFiles.length == 0) {
-                IJ.error("No input files selected.");
-                return;
-            }
             if (outputDir == null) {
                 IJ.error("No output directory selected.");
                 return;
@@ -129,11 +162,60 @@ public class CellSegmentationCommand_Batch implements Command {
                 return;
             }
 
-            IJ.log("[CellSegmentation Batch] Starting. Files=" + inputFiles.length);
+            final InputMode mode;
+            try {
+                mode = InputMode.fromName(inputMode);
+            } catch (Exception e) {
+                IJ.error("Invalid batch mode", e.getMessage());
+                return;
+            }
+
+            final BioFormatsPlaneReader reader;
+            try {
+                reader = new BioFormatsPlaneReader();
+            } catch (BioFormatsPlaneReader.BioFormatsUnavailableException e) {
+                IJ.error("Bio-Formats not available",
+                        "Bio-Formats is required for batch reading (ND2/CZI/LIF/etc.).\n"
+                                + "Install or update Bio-Formats in Fiji (Help > Update...).");
+                return;
+            }
+
+            List<PairedUnit> pairedUnits;
+            try {
+                pairedUnits = InputResolver.resolve(
+                        mode,
+                        ricmContainerFile,
+                        fluorContainerFile,
+                        ricmFiles,
+                        fluorFiles,
+                        combinedFiles,
+                        sameFileSegChannelIndex1Based,
+                        sameFileFirstMeasChannelIndex1Based,
+                        allTimepoints,
+                        reader);
+            } catch (Exception e) {
+                IJ.error("Invalid batch inputs", e.getMessage());
+                return;
+            }
+
+            try {
+                pairedUnits = normalizeMeasurementChannels(pairedUnits, mode, reader);
+            } catch (Exception e) {
+                IJ.error("Batch validation failed", e.getMessage());
+                return;
+            }
+
+            try {
+                validatePairsOrThrow(pairedUnits, reader);
+            } catch (Exception e) {
+                IJ.error("Batch validation failed", e.getMessage());
+                return;
+            }
+
+            IJ.log("[CellSegmentation Batch] Starting mode=" + mode.name() + " pairs=" + pairedUnits.size());
             IJ.log("[CellSegmentation Batch] Output dir: " + outputDir.getAbsolutePath());
 
             final EdgeDetector edgeDetector = EdgeDetector.fromLabel(edgeMethod);
-
             int measurements = buildMeasurementFlags();
             if (measurements == 0) {
                 measurements = ij.measure.Measurements.AREA;
@@ -155,173 +237,201 @@ public class CellSegmentationCommand_Batch implements Command {
                     false
             );
 
-            int processed = 0;
-            int skipped = 0;
-            int failed = 0;
+            int processedPairs = 0;
+            int failedPairs = 0;
 
-            final int n = inputFiles.length;
+            for (int i = 0; i < pairedUnits.size(); i++) {
+                final PairedUnit pair = pairedUnits.get(i);
+                final SegUnit seg = pair.getSegUnit();
+                final MeasUnit meas = pair.getMeasUnit();
+                final String pairBase = buildPairBaseName(pair, i);
 
-            for (int i = 0; i < n; i++) {
-                final File file = inputFiles[i];
-                if (file == null) {
-                    skipped++;
-                    continue;
-                }
-                if (!file.isFile()) {
-                    IJ.log("[CellSegmentation Batch] Skipping (not a file): " + file);
-                    skipped++;
-                    continue;
-                }
-
-                final String path = file.getAbsolutePath();
-                final String baseName = stripExtension(file.getName());
-
-                ImagePlus imp = null;
+                ImagePlus segImp = null;
                 ImagePlus overlay = null;
-                CellSegmentationResult r = null;
+                CellSegmentationResult result = null;
 
                 try {
-                    IJ.showStatus("Cell Segmentation: " + file.getName());
-                    IJ.showProgress(i, n);
+                    IJ.showStatus("Cell Segmentation batch pair " + (i + 1) + "/" + pairedUnits.size());
+                    IJ.showProgress(i, pairedUnits.size());
 
-                    imp = IJ.openImage(path);
-                    if (imp == null) {
-                        IJ.log("[CellSegmentation Batch] Skipping (failed to open): " + path);
-                        skipped++;
-                        continue;
-                    }
+                    IJ.log("[CellSegmentation Batch] Pair " + (i + 1) + "/" + pairedUnits.size()
+                            + " mode=" + mode.name()
+                            + " seg=" + seg.getSource().getName() + " S" + (seg.getSeriesIndex() + 1)
+                            + " C" + (seg.getSegChannelIndex() + 1)
+                            + " meas=" + meas.getSource().getName() + " S" + (meas.getSeriesIndex() + 1));
 
-                    r = CellSegmentationPipeline.run(imp, p);
+                    segImp = reader.openPlane(seg.getSource(), seg.getSeriesIndex(), seg.getSegChannelIndex(), 0);
+                    result = CellSegmentationPipeline.run(segImp, p);
 
-                    if (saveMask && r.mask != null) {
-                        saveImage(r.mask, new File(outputDir, baseName + "_mask.tif"));
+                    if (saveMask && result.mask != null) {
+                        saveImage(result.mask, new File(outputDir, pairBase + "_mask.tif"));
                     }
-                    if (saveLabels && r.labels != null) {
-                        saveImage(r.labels, new File(outputDir, baseName + "_labels.tif"));
+                    if (saveLabels && result.labels != null) {
+                        saveImage(result.labels, new File(outputDir, pairBase + "_labels.tif"));
                     }
-                    if (saveLabelOverlay && r.labels != null) {
-                        overlay = CellSegmentationPipeline.createLabelOverlay(imp, r.labels, labelsLut);
+                    if (saveLabelOverlay && result.labels != null) {
+                        overlay = CellSegmentationPipeline.createLabelOverlay(segImp, result.labels, labelsLut);
                         if (overlay != null) {
-                            saveImage(overlay, new File(outputDir, baseName + "_overlay.tif"));
+                            saveImage(overlay, new File(outputDir, pairBase + "_overlay.tif"));
                         }
                     }
-                    if (saveRois && r.roiManager != null) {
-                        File out = new File(outputDir, baseName + "_rois.zip");
-                        r.roiManager.runCommand("Save", out.getAbsolutePath());
-                    }
-                    if (saveMeasurements && r.resultsTable != null) {
-                        File out = new File(outputDir, baseName + "_measurements.csv");
-                        r.resultsTable.save(out.getAbsolutePath());
+                    if (saveRois && result.roiManager != null) {
+                        File out = new File(outputDir, pairBase + "_rois.zip");
+                        result.roiManager.runCommand("Save", out.getAbsolutePath());
                     }
 
-                    processed++;
+                    if (saveMeasurements && result.roiManager != null) {
+                        final SeriesMetadata measMeta = reader.getSeriesMetadata(meas.getSource(), meas.getSeriesIndex());
+                        final List<FrameSpec> frames = MeasurementPlan.planFrames(meas, measMeta);
+                        final boolean singleFrame = frames.size() == 1;
 
-                } catch (Exception e) {
-                    failed++;
-                    IJ.log("[CellSegmentation Batch] ERROR processing: " + path);
-                    IJ.handleException(e);
+                        for (FrameSpec frame : frames) {
+                            ImagePlus measImp = null;
+                            try {
+                                IJ.log("[CellSegmentation Batch] Measure pair=" + (i + 1)
+                                        + " file=" + meas.getSource().getName()
+                                        + " S" + (meas.getSeriesIndex() + 1)
+                                        + " C" + (frame.getChannelIndex() + 1)
+                                        + " T" + (frame.getTimeIndex() + 1));
 
+                                measImp = reader.openPlane(
+                                        meas.getSource(),
+                                        meas.getSeriesIndex(),
+                                        frame.getChannelIndex(),
+                                        frame.getTimeIndex());
+
+                                final ResultsTable measured = measureRoisOnImage(result.roiManager, measImp, measurements);
+                                final String frameSuffix = singleFrame
+                                        ? "_measurements.csv"
+                                        : "_C" + (frame.getChannelIndex() + 1)
+                                        + "_T" + (frame.getTimeIndex() + 1) + "_measurements.csv";
+                                measured.save(new File(outputDir, pairBase + frameSuffix).getAbsolutePath());
+                            } catch (Exception frameEx) {
+                                throw new RuntimeException("Measurement failed for file=" + meas.getSource().getName()
+                                        + " series=" + (meas.getSeriesIndex() + 1)
+                                        + " channel=" + (frame.getChannelIndex() + 1)
+                                        + " time=" + (frame.getTimeIndex() + 1), frameEx);
+                            } finally {
+                                closeImage(measImp);
+                            }
+                        }
+                    }
+
+                    processedPairs++;
+
+                } catch (Exception pairEx) {
+                    failedPairs++;
+                    IJ.log("[CellSegmentation Batch] ERROR pair " + (i + 1) + ": " + pairEx.getMessage());
+                    IJ.handleException(pairEx);
                 } finally {
-                    // Always clean up, even if we continued/skipped/errored.
                     closeImage(overlay);
-                    closeImage(r != null ? r.mask : null);
-                    closeImage(r != null ? r.labels : null);
-                    closeImage(imp);
+                    closeImage(result != null ? result.mask : null);
+                    closeImage(result != null ? result.labels : null);
+                    closeImage(segImp);
                 }
             }
 
             IJ.showProgress(1.0);
             IJ.showStatus("Batch Cell Segmentation complete.");
-
-            IJ.log("[CellSegmentation Batch] Done. processed=" + processed
-                    + " skipped=" + skipped
-                    + " failed=" + failed);
+            IJ.log("[CellSegmentation Batch] Done. processedPairs=" + processedPairs + " failedPairs=" + failedPairs);
         } finally {
-            // Restore background color pref
             Prefs.blackBackground = prevBlackBg;
         }
     }
 
+    private static List<PairedUnit> normalizeMeasurementChannels(
+            List<PairedUnit> pairs,
+            InputMode mode,
+            BioFormatsPlaneReader reader) {
 
+        if (mode != InputMode.FILE_LIST_PAIR) {
+            return pairs;
+        }
 
-//    @Override
-//    public void run() {
-//        if (inputFiles == null || inputFiles.length == 0) {
-//            IJ.error("No input files selected.");
-//            return;
-//        }
-//        if (outputDir == null) {
-//            IJ.error("No output directory selected.");
-//            return;
-//        }
-//        if (!outputDir.exists() && !outputDir.mkdirs()) {
-//            IJ.error("Could not create output directory: " + outputDir.getAbsolutePath());
-//            return;
-//        }
-//
-//        EdgeDetector edgeDetector = EdgeDetector.fromLabel(edgeMethod);
-//        int measurements = buildMeasurementFlags();
-//        if (measurements == 0) {
-//            measurements = ij.measure.Measurements.AREA;
-//            IJ.log("No measurements selected; defaulting to Area.");
-//        }
-//
-//        CellSegmentationParams p = new CellSegmentationParams(
-//                minArea,
-//                thrMethod,
-//                darkObjects,
-//                false,
-//                false,
-//                false,
-//                true,
-//                edgeDetector,
-//                measurements,
-//                labelsLut,
-//                false,
-//                false
-//        );
-//
-//        for (File file : inputFiles) {
-//            if (file == null) continue;
-//            String path = file.getAbsolutePath();
-//            ImagePlus imp = IJ.openImage(path);
-//            if (imp == null) {
-//                IJ.log("Skipping (failed to open): " + path);
-//                continue;
-//            }
-//
-//            CellSegmentationResult r = CellSegmentationPipeline.run(imp, p);
-//            String baseName = stripExtension(file.getName());
-//
-//            if (saveMask && r.mask != null) {
-//                saveImage(r.mask, new File(outputDir, baseName + "_mask.tif"));
-//            }
-//            if (saveLabels && r.labels != null) {
-//                saveImage(r.labels, new File(outputDir, baseName + "_labels.tif"));
-//            }
-//            if (saveLabelOverlay && r.labels != null) {
-//                ImagePlus overlay = CellSegmentationPipeline.createLabelOverlay(imp, r.labels, labelsLut);
-//                if (overlay != null) {
-//                    saveImage(overlay, new File(outputDir, baseName + "_overlay.tif"));
-//                    closeImage(overlay);
-//                }
-//            }
-//            if (saveRois && r.roiManager != null) {
-//                File out = new File(outputDir, baseName + "_rois.zip");
-//                r.roiManager.runCommand("Save", out.getAbsolutePath());
-//            }
-//            if (saveMeasurements && r.resultsTable != null) {
-//                File out = new File(outputDir, baseName + "_measurements.csv");
-//                r.resultsTable.save(out.getAbsolutePath());
-//            }
-//
-//            closeImage(r.mask);
-//            closeImage(r.labels);
-//            closeImage(imp);
-//        }
-//
-//        IJ.log("Batch Cell Segmentation complete.");
-//    }
+        final List<PairedUnit> out = new ArrayList<PairedUnit>();
+        for (PairedUnit pair : pairs) {
+            try {
+                final MeasUnit meas = pair.getMeasUnit();
+                final SeriesMetadata md = reader.getSeriesMetadata(meas.getSource(), meas.getSeriesIndex());
+                final int sizeC = Math.max(1, md.getSizeC());
+                final int[] channels = new int[sizeC];
+                for (int c = 0; c < sizeC; c++) channels[c] = c;
+
+                out.add(new PairedUnit(
+                        pair.getSegUnit(),
+                        new MeasUnit(meas.getSource(), meas.getSeriesIndex(), channels, meas.isAllTimepoints())
+                ));
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Failed to read fluorescence channel metadata for "
+                        + pair.getMeasUnit().getSource().getName() + ": " + e.getMessage(), e);
+            }
+        }
+
+        return out;
+    }
+
+    private static void validatePairsOrThrow(List<PairedUnit> pairs, BioFormatsPlaneReader reader) throws Exception {
+        for (int i = 0; i < pairs.size(); i++) {
+            final PairedUnit pair = pairs.get(i);
+            final SegUnit seg = pair.getSegUnit();
+            final MeasUnit meas = pair.getMeasUnit();
+
+            final SeriesMetadata segMeta = reader.getSeriesMetadata(seg.getSource(), seg.getSeriesIndex());
+            final SeriesMetadata measMeta = reader.getSeriesMetadata(meas.getSource(), meas.getSeriesIndex());
+
+            if (seg.getSegChannelIndex() < 0 || seg.getSegChannelIndex() >= Math.max(1, segMeta.getSizeC())) {
+                throw new IllegalArgumentException("Segmentation channel out of range at pair " + (i + 1)
+                        + " for file " + seg.getSource().getName()
+                        + " series " + (seg.getSeriesIndex() + 1)
+                        + ": C" + (seg.getSegChannelIndex() + 1)
+                        + " but sizeC=" + segMeta.getSizeC());
+            }
+
+            final List<FrameSpec> frames = MeasurementPlan.planFrames(meas, measMeta);
+            if (frames.isEmpty()) {
+                throw new IllegalArgumentException("No measurement frames at pair " + (i + 1));
+            }
+
+            if (segMeta.getSizeX() != measMeta.getSizeX() || segMeta.getSizeY() != measMeta.getSizeY()) {
+                throw new IllegalArgumentException("XY size mismatch at pair " + (i + 1)
+                        + ". seg=" + seg.getSource().getName() + "(S" + (seg.getSeriesIndex() + 1)
+                        + ", " + segMeta.getSizeX() + "x" + segMeta.getSizeY() + ")"
+                        + " vs meas=" + meas.getSource().getName() + "(S" + (meas.getSeriesIndex() + 1)
+                        + ", " + measMeta.getSizeX() + "x" + measMeta.getSizeY() + ")");
+            }
+        }
+    }
+
+    private static ResultsTable measureRoisOnImage(RoiManager roiManager, ImagePlus image, int measurements) {
+        final ResultsTable rt = new ResultsTable();
+        if (roiManager == null || image == null) {
+            return rt;
+        }
+
+        final Analyzer analyzer = new Analyzer(image, measurements, rt);
+        final Roi[] rois = roiManager.getRoisAsArray();
+        for (Roi roi : rois) {
+            image.setRoi(roi);
+            analyzer.measure();
+        }
+        image.deleteRoi();
+        return rt;
+    }
+
+    private String buildPairBaseName(PairedUnit pair, int pairIndex0) {
+        final SegUnit seg = pair.getSegUnit();
+        final MeasUnit meas = pair.getMeasUnit();
+
+        final String segBase = stripExtension(seg.getSource().getName());
+        final String measBase = stripExtension(meas.getSource().getName());
+        final String segSeries = "S" + (seg.getSeriesIndex() + 1);
+        final String measSeries = "S" + (meas.getSeriesIndex() + 1);
+
+        if (seg.getSource().equals(meas.getSource()) && seg.getSeriesIndex() == meas.getSeriesIndex()) {
+            return segBase + "_" + segSeries;
+        }
+        return "pair" + (pairIndex0 + 1) + "_" + segBase + "_" + segSeries + "__" + measBase + "_" + measSeries;
+    }
 
     private void editMeasurements() {
         GenericDialog gd = new GenericDialog("Measurements");
