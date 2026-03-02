@@ -10,7 +10,7 @@ import org.scijava.plugin.Plugin;
 import org.scijava.widget.Button;
 
 @SuppressWarnings({"unused", "FieldMayBeFinal", "CanBeFinal", "FieldCanBeLocal"})
-@Plugin(type = Command.class)
+@Plugin(type = Command.class, name = "Cell Segmentation")
 public class CellSegmentationCommand implements Command {
 
     // SciJava injects the currently active image when the command is launched from

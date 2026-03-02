@@ -5,7 +5,6 @@ import ij.ImagePlus;
 import ij.WindowManager;
 import ij.gui.Roi;
 import ij.CompositeImage;
-import ij.gui.WaitForUserDialog;
 import ij.measure.ResultsTable;
 import ij.plugin.Duplicator;
 import ij.plugin.filter.Analyzer;
@@ -17,9 +16,25 @@ import ij.process.ImageConverter;
 import ij.process.ColorProcessor;
 import ij.process.ShortProcessor;
 import ij.ImageStack;
+import java.awt.BorderLayout;
+import java.awt.Dimension;
+import java.awt.Frame;
+import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.awt.Window;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import ij.process.ByteProcessor;
+import javax.swing.JButton;
+import javax.swing.JDialog;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
+import javax.swing.SwingConstants;
+import javax.swing.border.EmptyBorder;
 public final class CellSegmentationPipeline {
 
     private CellSegmentationPipeline() {}
@@ -95,6 +110,9 @@ public final class CellSegmentationPipeline {
         // That mirrors the same logical stop-point used in the interactive pipeline.
         ImagePlus work = duplicateForProcessing(imp, show);
         applyEdgeDetector(work, edgeDetector);
+        // Gradient images often start with stale display limits inherited from the
+        // source image, so reset them to the actual gradient dynamic range.
+        autoAdjustDisplayRange(work);
         return work;
     }
 
@@ -160,7 +178,10 @@ public final class CellSegmentationPipeline {
         // From this point on, `work` is the full segmentation scratch image and `imp`
         // remains the untouched source used for measurements/overlays.
         // 2) Threshold + optional pause
-        applyThreshold(work, thresholdConfig, pauseThreshold);
+        if (!applyThreshold(work, thresholdConfig, pauseThreshold)) {
+            closeIfVisible(work);
+            return new CellSegmentationResult(null, null, 0, null, null);
+        }
 
         // Convert current threshold to a binary mask.
         IJ.run(work, "Convert to Mask", "");
@@ -182,9 +203,9 @@ public final class CellSegmentationPipeline {
         // Show Watershed
         showStepSnapshot(work, "4 - Watershed", p.showSteps);
 
-        // Output mask
-        ImagePlus mask = work.duplicate();
-        mask.setTitle("Cell Mask");
+        // Preserve the raw post-watershed mask as an optional intermediate view. This
+        // still includes components that may later be filtered out by min-area.
+        showStepSnapshot(work, "5 - Pre-Label Mask", p.showSteps);
 
         // 5) Analyze particles on mask, then measure on the original image.
         AnalysisResult analysis = analyzeParticlesAndMeasureOnOriginal(
@@ -192,9 +213,14 @@ public final class CellSegmentationPipeline {
         RoiManager rm = analysis.roiManager;
         ResultsTable rt = analysis.resultsTable;
 
-        // 6) Labels image (1-based label per ROI)
+        // Final output mask should match the accepted ROI set rather than the raw
+        // watershed mask, so filtered-out particles disappear from the saved/displayed mask.
         final int w = work.getWidth();
         final int h = work.getHeight();
+        ImagePlus mask = buildMaskFromRois(rm != null ? rm.getRoisAsArray() : null, w, h);
+        mask.setTitle("Cell Mask");
+
+        // 6) Labels image (1-based label per ROI)
         ImagePlus labels = buildLabelsFromRois(rm, w, h);
         labels.setTitle("Labels");
 
@@ -221,7 +247,8 @@ public final class CellSegmentationPipeline {
 
     private static ImagePlus duplicateForProcessing(ImagePlus imp, boolean show) {
         ImagePlus work = new Duplicator().run(imp);
-        work.setTitle("duplicate_im");
+        final String sourceTitle = imp != null && imp.getTitle() != null ? imp.getTitle() : "Image";
+        work.setTitle(sourceTitle + " - Threshold Preview");
 
         if (show) {
             work.show();
@@ -284,7 +311,16 @@ public final class CellSegmentationPipeline {
         work.setProcessor(base);
     }
 
-    private static void applyThreshold(ImagePlus work, ThresholdConfig thresholdConfig, boolean pauseThreshold) {
+    private static void autoAdjustDisplayRange(ImagePlus work) {
+        if (work == null || work.getProcessor() == null) {
+            return;
+        }
+        work.getProcessor().resetMinAndMax();
+        work.resetDisplayRange();
+        work.updateAndDraw();
+    }
+
+    private static boolean applyThreshold(ImagePlus work, ThresholdConfig thresholdConfig, boolean pauseThreshold) {
         final ThresholdConfig config = thresholdConfig != null
                 ? thresholdConfig
                 : ThresholdConfig.auto("Default", true);
@@ -301,13 +337,104 @@ public final class CellSegmentationPipeline {
             }
 
             IJ.run(work, "Threshold...", "");
-            new WaitForUserDialog(
-                    "Adjust threshold",
-                    "Adjust the threshold sliders on the gradient image.\n" +
-                            "IMPORTANT: Do NOT click 'Apply' in the Threshold window.\n" +
-                            "When you're happy, click OK here to continue."
-            ).show();
+            return showSingleImageThresholdDialog();
         }
+        return true;
+    }
+
+    private static boolean showSingleImageThresholdDialog() {
+        final CountDownLatch latch = new CountDownLatch(1);
+        final AtomicReference<Boolean> shouldContinue = new AtomicReference<Boolean>(Boolean.TRUE);
+        final AtomicBoolean completed = new AtomicBoolean(false);
+
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+                final JDialog dialog = createCenteredDialog(
+                        "Adjust threshold",
+                        "Adjust the threshold, then choose an action.",
+                        false);
+
+                final Runnable continueRun = new Runnable() {
+                    @Override
+                    public void run() {
+                        if (completed.compareAndSet(false, true)) {
+                            shouldContinue.set(Boolean.TRUE);
+                            dialog.dispose();
+                            latch.countDown();
+                        }
+                    }
+                };
+
+                final Runnable abortRun = new Runnable() {
+                    @Override
+                    public void run() {
+                        if (completed.compareAndSet(false, true)) {
+                            shouldContinue.set(Boolean.FALSE);
+                            dialog.dispose();
+                            latch.countDown();
+                        }
+                    }
+                };
+
+                JButton continueButton = new JButton("Continue");
+                continueButton.addActionListener(e -> continueRun.run());
+                JButton abortButton = new JButton("Abort");
+                abortButton.addActionListener(e -> abortRun.run());
+                dialog.add(buttonPanel(continueButton, abortButton), BorderLayout.SOUTH);
+                dialog.addWindowListener(new WindowAdapter() {
+                    @Override
+                    public void windowClosing(WindowEvent e) {
+                        continueRun.run();
+                    }
+                });
+                dialog.setVisible(true);
+            }
+        });
+
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+
+        if (!shouldContinue.get().booleanValue()) {
+            IJ.log("[CellSegmentation] Aborted during threshold adjustment.");
+        }
+        return shouldContinue.get().booleanValue();
+    }
+
+    private static JDialog createCenteredDialog(String title, String message, boolean alwaysOnTop) {
+        final Frame owner = IJ.getInstance();
+        final JDialog dialog = new JDialog(owner, title, false);
+        dialog.setLayout(new BorderLayout(8, 8));
+        final JLabel label = new JLabel(
+                "<html><div style='text-align:center;'>" + message + "</div></html>",
+                SwingConstants.CENTER);
+        label.setBorder(new EmptyBorder(12, 16, 4, 16));
+        dialog.add(label, BorderLayout.CENTER);
+        dialog.setAlwaysOnTop(alwaysOnTop);
+        dialog.pack();
+        final Dimension size = dialog.getSize();
+        dialog.setSize(new Dimension(Math.max(380, size.width), Math.max(150, size.height)));
+        centerOnScreen(dialog);
+        return dialog;
+    }
+
+    private static void centerOnScreen(JDialog dialog) {
+        final Rectangle bounds = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        final int x = bounds.x + Math.max(0, (bounds.width - dialog.getWidth()) / 2);
+        final int y = bounds.y + Math.max(0, (bounds.height - dialog.getHeight()) / 2);
+        dialog.setLocation(x, y);
+    }
+
+    private static JPanel buttonPanel(JButton... buttons) {
+        final JPanel panel = new JPanel();
+        for (JButton button : buttons) {
+            panel.add(button);
+        }
+        return panel;
     }
 
     private static AnalysisResult analyzeParticlesAndMeasureOnOriginal(
@@ -321,9 +448,12 @@ public final class CellSegmentationPipeline {
 
         // ROI Manager is global state in IJ1. `clearRM` decides whether this run should
         // start from an empty manager or append to whatever is already there.
-        RoiManager rm = RoiManager.getInstance();
+        final boolean useVisibleRoiManager = showRoiManager;
+        RoiManager rm = useVisibleRoiManager ? RoiManager.getInstance() : null;
         if (rm == null) {
-            rm = new RoiManager();
+            // Use a hidden manager when the caller only needs ROI storage and not the
+            // floating ROI Manager window.
+            rm = useVisibleRoiManager ? new RoiManager() : new RoiManager(false);
         }
         rm.setVisible(showRoiManager);
         if (clearRM) rm.reset();

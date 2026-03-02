@@ -4,7 +4,6 @@ import ij.IJ;
 import ij.ImageJ;
 import ij.ImagePlus;
 import ij.WindowManager;
-import ij.gui.Overlay;
 import ij.gui.Roi;
 import ij.plugin.frame.RoiManager;
 import java.awt.BorderLayout;
@@ -34,18 +33,19 @@ public final class BatchStopController {
     private RoiManager reviewRoiManager;
     private boolean reviewRoiManagerOwned;
 
-    public ThresholdConfig maybeSelectThreshold(
+    public ThresholdSelectionResult maybeSelectThreshold(
             Context ctx,
             final ImagePlus ricmPreview,
             final ThresholdConfig currentOrDefault,
             final String title) {
 
         if (ricmPreview == null) {
-            return currentOrDefault;
+            return ThresholdSelectionResult.continueWith(currentOrDefault);
         }
 
         final CountDownLatch latch = new CountDownLatch(1);
-        final AtomicReference<ThresholdConfig> selected = new AtomicReference<ThresholdConfig>(currentOrDefault);
+        final AtomicReference<ThresholdSelectionResult> selected =
+                new AtomicReference<ThresholdSelectionResult>(ThresholdSelectionResult.continueWith(currentOrDefault));
         final AtomicBoolean completed = new AtomicBoolean(false);
 
         // UI creation and updates must happen on the Swing EDT. The batch worker thread
@@ -66,25 +66,52 @@ public final class BatchStopController {
 
                 // This is intentionally a tiny controller dialog. The real threshold UI
                 // is still ImageJ's standard Threshold window.
-                final JDialog dialog = createDialog(title, "Adjust the threshold, then click Apply.", false);
-                final Runnable finish = new Runnable() {
+                final JDialog dialog = createDialog(title, "Adjust the threshold, then choose an action.", false);
+                final Runnable continueRun = new Runnable() {
                     @Override
                     public void run() {
                         if (completed.compareAndSet(false, true)) {
-                            selected.set(CellSegmentationPipeline.captureThresholdConfig(ricmPreview, currentOrDefault));
+                            selected.set(ThresholdSelectionResult.continueWith(
+                                    CellSegmentationPipeline.captureThresholdConfig(ricmPreview, currentOrDefault)));
                             dialog.dispose();
                             latch.countDown();
                         }
                     }
                 };
 
-                JButton applyButton = new JButton("Apply");
-                applyButton.addActionListener(e -> finish.run());
-                dialog.add(buttonPanel(applyButton), BorderLayout.SOUTH);
+                final Runnable skipRun = new Runnable() {
+                    @Override
+                    public void run() {
+                        if (completed.compareAndSet(false, true)) {
+                            selected.set(ThresholdSelectionResult.skip());
+                            dialog.dispose();
+                            latch.countDown();
+                        }
+                    }
+                };
+
+                final Runnable abortRun = new Runnable() {
+                    @Override
+                    public void run() {
+                        if (completed.compareAndSet(false, true)) {
+                            selected.set(ThresholdSelectionResult.abort());
+                            dialog.dispose();
+                            latch.countDown();
+                        }
+                    }
+                };
+
+                JButton continueButton = new JButton("Continue");
+                continueButton.addActionListener(e -> continueRun.run());
+                JButton skipButton = new JButton("Skip");
+                skipButton.addActionListener(e -> skipRun.run());
+                JButton abortButton = new JButton("Abort");
+                abortButton.addActionListener(e -> abortRun.run());
+                dialog.add(buttonPanel(continueButton, skipButton, abortButton), BorderLayout.SOUTH);
                 dialog.addWindowListener(new WindowAdapter() {
                     @Override
                     public void windowClosing(WindowEvent e) {
-                        finish.run();
+                        continueRun.run();
                     }
                 });
                 dialog.setVisible(true);
@@ -94,10 +121,13 @@ public final class BatchStopController {
         // `await` runs on the batch worker thread, so Fiji's UI remains responsive.
         IJ.log("[CellSegmentation Batch] Waiting for threshold selection: " + title);
         await(latch);
-        final ThresholdConfig result = selected.get();
+        final ThresholdSelectionResult result = selected.get();
         IJ.log("[CellSegmentation Batch] Threshold selection complete: " + title
-                + " mode=" + (result != null && result.isManual() ? "manual" : "auto"));
-        return result != null ? result : currentOrDefault;
+                + " action=" + result.getAction().name()
+                + (result.isContinue()
+                ? " mode=" + (result.getConfig() != null && result.getConfig().isManual() ? "manual" : "auto")
+                : ""));
+        return result;
     }
 
     public RoiReviewResult maybeReviewRois(
@@ -114,15 +144,6 @@ public final class BatchStopController {
             @Override
             public void run() {
                 final ImagePlus reviewImp = imp != null ? imp.duplicate() : null;
-                if (reviewImp != null) {
-                    reviewImp.setTitle(title);
-                    reviewImp.setOverlay(buildOverlay(proposedRois));
-                    reviewImp.show();
-                    if (reviewImp.getWindow() != null) {
-                        WindowManager.setCurrentWindow(reviewImp.getWindow());
-                    }
-                }
-
                 // ROI edits happen through the standard IJ1 ROI Manager so users can
                 // rely on familiar Fiji tools instead of custom editing controls.
                 final RoiManager roiManager = getVisibleRoiManager();
@@ -132,12 +153,21 @@ public final class BatchStopController {
                         roiManager.addRoi(roi);
                     }
                 }
+                if (reviewImp != null) {
+                    reviewImp.setTitle(title);
+                    reviewImp.show();
+                    roiManager.runCommand(reviewImp, "Show All with labels");
+                    if (reviewImp.getWindow() != null) {
+                        WindowManager.setCurrentWindow(reviewImp.getWindow());
+                    }
+                }
 
                 final JDialog dialog = createDialog(title, "Review ROIs in ROI Manager, then choose an action.", true);
                 final Runnable cleanup = new Runnable() {
                     @Override
                     public void run() {
                         if (reviewImp != null) {
+                            roiManager.runCommand(reviewImp, "Show None");
                             reviewImp.changes = false;
                             reviewImp.close();
                         }
@@ -274,16 +304,6 @@ public final class BatchStopController {
         reviewRoiManagerOwned = false;
     }
 
-    private static Overlay buildOverlay(Roi[] rois) {
-        final Overlay overlay = new Overlay();
-        for (Roi roi : cloneRois(rois)) {
-            if (roi != null) {
-                overlay.add(roi);
-            }
-        }
-        return overlay;
-    }
-
     private static Roi[] cloneRois(Roi[] rois) {
         if (rois == null || rois.length == 0) {
             return new Roi[0];
@@ -334,6 +354,48 @@ public final class BatchStopController {
 
         public Roi[] getRois() {
             return cloneRois(rois);
+        }
+    }
+
+    public static final class ThresholdSelectionResult {
+        private final RoiReviewAction action;
+        private final ThresholdConfig config;
+
+        private ThresholdSelectionResult(RoiReviewAction action, ThresholdConfig config) {
+            this.action = action;
+            this.config = config;
+        }
+
+        public static ThresholdSelectionResult continueWith(ThresholdConfig config) {
+            return new ThresholdSelectionResult(RoiReviewAction.CONTINUE, config);
+        }
+
+        public static ThresholdSelectionResult skip() {
+            return new ThresholdSelectionResult(RoiReviewAction.SKIP, null);
+        }
+
+        public static ThresholdSelectionResult abort() {
+            return new ThresholdSelectionResult(RoiReviewAction.ABORT, null);
+        }
+
+        public RoiReviewAction getAction() {
+            return action;
+        }
+
+        public boolean isContinue() {
+            return action == RoiReviewAction.CONTINUE;
+        }
+
+        public boolean isSkip() {
+            return action == RoiReviewAction.SKIP;
+        }
+
+        public boolean isAbort() {
+            return action == RoiReviewAction.ABORT;
+        }
+
+        public ThresholdConfig getConfig() {
+            return config;
         }
     }
 

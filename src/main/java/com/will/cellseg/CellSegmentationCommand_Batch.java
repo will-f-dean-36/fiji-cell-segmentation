@@ -32,7 +32,7 @@ import org.scijava.plugin.Plugin;
 import org.scijava.widget.Button;
 
 @SuppressWarnings({"unused", "FieldMayBeFinal", "CanBeFinal", "FieldCanBeLocal"})
-@Plugin(type = Command.class)
+@Plugin(type = Command.class, name = "Cell Segmentation Batch")
 public class CellSegmentationCommand_Batch implements Command {
 
     // These strings intentionally match the IJ1 wrapper choices exactly, since the
@@ -322,7 +322,7 @@ public class CellSegmentationCommand_Batch implements Command {
                         // Load exactly one segmentation plane per unique RICM: series + channel, Z=0, T=0.
                         segImp = reader.openPlane(seg.getSource(), seg.getSeriesIndex(), seg.getSegChannelIndex(), 0);
                         final boolean stopForThreshold = shouldStopForThreshold(segKey, thresholdStopUsed);
-                        final ThresholdConfig pairThresholdConfig = chooseThresholdConfig(
+                        final ThresholdSelection thresholdSelection = chooseThresholdConfig(
                                 stopController,
                                 segImp,
                                 segKey,
@@ -331,6 +331,21 @@ public class CellSegmentationCommand_Batch implements Command {
                                 i + 1,
                                 pairedUnits.size(),
                                 seg);
+
+                        if (thresholdSelection.isAbort()) {
+                            aborted = true;
+                            IJ.log("[CellSegmentation Batch] Aborted by user during threshold selection: " + segKey);
+                            segmentationCache.put(segKey, CachedSegmentationResult.abort());
+                            break;
+                        }
+                        if (thresholdSelection.isSkip()) {
+                            skippedPairs++;
+                            IJ.log("[CellSegmentation Batch] Skipping pair " + (i + 1) + " during threshold selection: " + segKey);
+                            segmentationCache.put(segKey, CachedSegmentationResult.skip());
+                            continue;
+                        }
+
+                        final ThresholdConfig pairThresholdConfig = thresholdSelection.getConfig();
                         if (stopForThreshold && isThresholdStopOnce()) {
                             sharedThresholdConfig = pairThresholdConfig;
                             thresholdStopUsed = true;
@@ -651,7 +666,7 @@ public class CellSegmentationCommand_Batch implements Command {
         return ROI_REVIEW_ONCE.equals(roiReviewMode);
     }
 
-    private ThresholdConfig chooseThresholdConfig(
+    private ThresholdSelection chooseThresholdConfig(
             BatchStopController stopController,
             ImagePlus segImp,
             String segKey,
@@ -665,25 +680,30 @@ public class CellSegmentationCommand_Batch implements Command {
             final ThresholdConfig cachedConfig = thresholdConfigCache.get(segKey);
             if (cachedConfig != null) {
                 // Reuse the exact threshold config chosen for this SegUnit earlier.
-                return cachedConfig;
+                return ThresholdSelection.continueWith(cachedConfig);
             }
         }
 
         if (!shouldStop) {
-            return currentConfig;
+            return ThresholdSelection.continueWith(currentConfig);
         }
 
         final ImagePlus preview = CellSegmentationPipeline.prepareThresholdPreview(segImp, EdgeDetector.fromLabel(edgeMethod), true);
         try {
-            final ThresholdConfig selectedConfig = stopController.maybeSelectThreshold(
+            preview.setTitle(buildThresholdImageTitle(pairIndex1, totalPairs, seg));
+            final BatchStopController.ThresholdSelectionResult selected = stopController.maybeSelectThreshold(
                     context,
                     preview,
                     currentConfig,
                     buildThresholdTitle(pairIndex1, totalPairs, seg));
+            if (!selected.isContinue()) {
+                return ThresholdSelection.from(selected);
+            }
+            final ThresholdConfig selectedConfig = selected.getConfig();
             if (isThresholdStopUnique()) {
                 thresholdConfigCache.put(segKey, selectedConfig);
             }
-            return selectedConfig;
+            return ThresholdSelection.continueWith(selectedConfig);
         } finally {
             closeImage(preview);
         }
@@ -770,6 +790,12 @@ public class CellSegmentationCommand_Batch implements Command {
                 + seg.getSource().getName() + " [series " + (seg.getSeriesIndex() + 1) + "]";
     }
 
+    private static String buildThresholdImageTitle(int pairIndex1, int totalPairs, SegUnit seg) {
+        return "Threshold Preview (RICM " + pairIndex1 + "/" + totalPairs + "): "
+                + seg.getSource().getName() + " [S" + (seg.getSeriesIndex() + 1)
+                + ", C" + (seg.getSegChannelIndex() + 1) + "]";
+    }
+
     private static String buildRoiReviewTitle(int pairIndex1, int totalPairs, SegUnit seg) {
         return "ROI Review (RICM " + pairIndex1 + "/" + totalPairs + "): "
                 + seg.getSource().getName() + " [series " + (seg.getSeriesIndex() + 1) + "]";
@@ -817,6 +843,36 @@ public class CellSegmentationCommand_Batch implements Command {
 
         private Roi[] getRois() {
             return cloneRois(rois);
+        }
+    }
+
+    private static final class ThresholdSelection {
+        private final BatchStopController.RoiReviewAction action;
+        private final ThresholdConfig config;
+
+        private ThresholdSelection(BatchStopController.RoiReviewAction action, ThresholdConfig config) {
+            this.action = action;
+            this.config = config;
+        }
+
+        private static ThresholdSelection continueWith(ThresholdConfig config) {
+            return new ThresholdSelection(BatchStopController.RoiReviewAction.CONTINUE, config);
+        }
+
+        private static ThresholdSelection from(BatchStopController.ThresholdSelectionResult result) {
+            return new ThresholdSelection(result.getAction(), result.getConfig());
+        }
+
+        private boolean isSkip() {
+            return action == BatchStopController.RoiReviewAction.SKIP;
+        }
+
+        private boolean isAbort() {
+            return action == BatchStopController.RoiReviewAction.ABORT;
+        }
+
+        private ThresholdConfig getConfig() {
+            return config;
         }
     }
 }
