@@ -13,6 +13,8 @@ import org.scijava.widget.Button;
 @Plugin(type = Command.class)
 public class CellSegmentationCommand implements Command {
 
+    // SciJava injects the currently active image when the command is launched from
+    // the IJ1 wrapper (or directly from the ImageJ2 command system).
     @Parameter
     private ImagePlus imp;
 
@@ -107,6 +109,8 @@ public class CellSegmentationCommand implements Command {
         // Convert UI choice string into a concrete edge detector.
         EdgeDetector edgeDetector = EdgeDetector.fromLabel(edgeMethod);
 
+        // IJ1 measurement flags are a bitmask, so the checkbox UI is collapsed into
+        // one integer that ParticleAnalyzer / Analyzer understand.
         int measurements = buildMeasurementFlags();
         if (measurements == 0) {
             measurements = ij.measure.Measurements.AREA;
@@ -135,7 +139,8 @@ public class CellSegmentationCommand implements Command {
             // Ensure black defines background
             Prefs.blackBackground = true;
 
-            // Run pipeline
+            // The pipeline returns display-ready images plus the ROI/measurement state
+            // accumulated during analysis.
             CellSegmentationResult r = CellSegmentationPipeline.run(imp, p);
 
             if (r.mask != null) r.mask.show();
@@ -151,6 +156,8 @@ public class CellSegmentationCommand implements Command {
     }
 
     private void editMeasurements() {
+        // SciJava buttons call back into regular instance methods, so this opens a
+        // secondary IJ1 dialog without leaving the main command UI.
         GenericDialog gd = new GenericDialog("Measurements");
         gd.addMessage("Select particle measurements to record:");
         gd.addCheckbox("Area", measureArea);
@@ -179,6 +186,7 @@ public class CellSegmentationCommand implements Command {
     }
 
     private int buildMeasurementFlags() {
+        // ImageJ encodes measurement options as OR-ed constants.
         int meas = 0;
         if (measureArea) meas |= ij.measure.Measurements.AREA;
         if (measureMean) meas |= ij.measure.Measurements.MEAN;

@@ -13,6 +13,17 @@ import org.scijava.command.CommandService;
 
 public class CellSegmentation_IJ1_Batch implements PlugIn {
 
+    private static final String[] THRESHOLD_STOP_LABELS = new String[] {
+            "Don't stop",
+            "Stop once (set and apply to all)",
+            "Stop once per unique RICM"
+    };
+
+    private static final String[] ROI_REVIEW_LABELS = new String[] {
+            "Don't stop",
+            "Stop once per unique RICM"
+    };
+
     private static final String[] MODE_LABELS = new String[] {
             "Mode 1: Two container files (pair by series index)",
             "Mode 2: Two file lists (pair by selection order)",
@@ -22,6 +33,8 @@ public class CellSegmentation_IJ1_Batch implements PlugIn {
     @Override
     public void run(String arg) {
 
+        // Like the single-image wrapper, this class is mostly an IJ1-native file picker
+        // that forwards user choices into the batch SciJava command.
         IJ.log("[CellSegmentation IJ1 Batch] Starting...");
         IJ.log("[CellSegmentation IJ1 Batch] run() jar=" + getClass().getProtectionDomain().getCodeSource().getLocation());
 
@@ -49,27 +62,37 @@ public class CellSegmentation_IJ1_Batch implements PlugIn {
                 "combinedFiles", selection.combinedFiles,
                 "sameFileSegChannelIndex1Based", Integer.valueOf(uiOptions.sameFileSegChannelIndex1Based),
                 "sameFileFirstMeasChannelIndex1Based", Integer.valueOf(uiOptions.sameFileFirstMeasChannelIndex1Based),
+                "thresholdStopMode", uiOptions.thresholdStopMode,
+                "roiReviewMode", uiOptions.roiReviewMode,
                 "allTimepoints", Boolean.TRUE,
                 "outputDir", outDir);
     }
 
     private static BatchUiOptions askInputOptions() {
+        // Keep the first dialog limited to structural batch choices. The SciJava command
+        // still owns the segmentation parameters (threshold method, measurements, etc.).
         final GenericDialog gd = new GenericDialog("Batch Input Mode");
         gd.addChoice("Input mode", MODE_LABELS, MODE_LABELS[0]);
         gd.addNumericField("Mode 3 RICM channel (1-based)", 1, 0);
         gd.addNumericField("Mode 3 first fluorescence channel (1-based)", 2, 0);
-        gd.addMessage("Batch is non-interactive. Bio-Formats dialogs are disabled.");
+        gd.addChoice("Threshold Stop Mode", THRESHOLD_STOP_LABELS, THRESHOLD_STOP_LABELS[0]);
+        gd.addChoice("ROI Review Mode", ROI_REVIEW_LABELS, ROI_REVIEW_LABELS[0]);
+        gd.addMessage("Batch stop-points are optional. Bio-Formats dialogs are disabled.");
         gd.showDialog();
         if (gd.wasCanceled()) return null;
 
         final int selectedMode = gd.getNextChoiceIndex();
         final int segChannel = Math.max(1, (int) Math.round(gd.getNextNumber()));
         final int firstMeas = Math.max(1, (int) Math.round(gd.getNextNumber()));
+        final String thresholdStopMode = gd.getNextChoice();
+        final String roiReviewMode = gd.getNextChoice();
 
-        return new BatchUiOptions(indexToMode(selectedMode), segChannel, firstMeas);
+        return new BatchUiOptions(indexToMode(selectedMode), segChannel, firstMeas, thresholdStopMode, roiReviewMode);
     }
 
     private static SelectionPayload chooseFiles(InputMode mode) {
+        // Each input mode maps to a different file-selection workflow, but they all end
+        // up as a single payload object passed to the batch command.
         switch (mode) {
             case CONTAINER_SERIES_PAIR:
                 File ricmContainer = chooseSingleFile("Select RICM container file");
@@ -134,11 +157,20 @@ public class CellSegmentation_IJ1_Batch implements PlugIn {
         private final InputMode mode;
         private final int sameFileSegChannelIndex1Based;
         private final int sameFileFirstMeasChannelIndex1Based;
+        private final String thresholdStopMode;
+        private final String roiReviewMode;
 
-        private BatchUiOptions(InputMode mode, int sameFileSegChannelIndex1Based, int sameFileFirstMeasChannelIndex1Based) {
+        private BatchUiOptions(
+                InputMode mode,
+                int sameFileSegChannelIndex1Based,
+                int sameFileFirstMeasChannelIndex1Based,
+                String thresholdStopMode,
+                String roiReviewMode) {
             this.mode = mode;
             this.sameFileSegChannelIndex1Based = sameFileSegChannelIndex1Based;
             this.sameFileFirstMeasChannelIndex1Based = sameFileFirstMeasChannelIndex1Based;
+            this.thresholdStopMode = thresholdStopMode;
+            this.roiReviewMode = roiReviewMode;
         }
     }
 

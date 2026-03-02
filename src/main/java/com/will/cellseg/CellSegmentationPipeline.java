@@ -19,6 +19,7 @@ import ij.process.ShortProcessor;
 import ij.ImageStack;
 import java.awt.Window;
 import ij.process.ByteProcessor;
+import javax.swing.SwingUtilities;
 public final class CellSegmentationPipeline {
 
     private CellSegmentationPipeline() {}
@@ -60,19 +61,24 @@ public final class CellSegmentationPipeline {
     };
 
     public static CellSegmentationResult run(ImagePlus imp, CellSegmentationParams p) {
+        // The simple entry point derives a reusable threshold config from the command
+        // parameters, then delegates to the more general overload used by batch mode.
+        return run(imp, p, ThresholdConfig.auto(p.thrMethod, p.darkObjects));
+    }
+
+    public static CellSegmentationResult run(ImagePlus imp, CellSegmentationParams p, ThresholdConfig thresholdConfig) {
         if (imp == null) {
             IJ.noImage();
             return new CellSegmentationResult(null, null, 0, null, null);
         }
 
+        // Threshold preview and segmentation are done on a duplicate so the source image
+        // stays untouched and can still be used for intensity measurements.
         // Show work image only if threshold UI needs a window, or if user wants steps.
         final boolean showWork = p.pauseThreshold || p.showSteps;
 
         // Work on a duplicate so the original image stays untouched.
-        ImagePlus work = duplicateForProcessing(imp, showWork);
-
-        // 1) Edge detection (to emphasize cell boundaries before thresholding)
-        applyEdgeDetector(work, p.edgeDetector);
+        ImagePlus work = prepareThresholdPreview(imp, p.edgeDetector, showWork);
 
         // Capture gradient *now*, but do not show it yet (avoid breaking threshold pause)
         ImagePlus gradientSnap = null;
@@ -81,8 +87,80 @@ public final class CellSegmentationPipeline {
             gradientSnap.setTitle("1 - Gradient");
         }
 
+        return completeSegmentation(work, imp, p, thresholdConfig, gradientSnap, p.pauseThreshold);
+    }
+
+    public static ImagePlus prepareThresholdPreview(ImagePlus imp, EdgeDetector edgeDetector, boolean show) {
+        // Batch mode uses this to stop after edge detection but before thresholding.
+        // That mirrors the same logical stop-point used in the interactive pipeline.
+        ImagePlus work = duplicateForProcessing(imp, show);
+        applyEdgeDetector(work, edgeDetector);
+        return work;
+    }
+
+    public static CellSegmentationResult completeSegmentation(
+            ImagePlus preparedWork,
+            ImagePlus original,
+            CellSegmentationParams p,
+            ThresholdConfig thresholdConfig) {
+        return completeSegmentation(preparedWork, original, p, thresholdConfig, null, false);
+    }
+
+    public static ThresholdConfig captureThresholdConfig(ImagePlus work, ThresholdConfig fallback) {
+        // ImageJ stores threshold state on the ImageProcessor, so we read it back from
+        // the preview image after the user adjusts the Threshold window.
+        if (work == null || work.getProcessor() == null) {
+            return fallback;
+        }
+
+        final double minThreshold = work.getProcessor().getMinThreshold();
+        final double maxThreshold = work.getProcessor().getMaxThreshold();
+        if (minThreshold == ImageProcessor.NO_THRESHOLD || maxThreshold == ImageProcessor.NO_THRESHOLD) {
+            return fallback;
+        }
+
+        final ThresholdConfig base = fallback != null ? fallback : ThresholdConfig.auto("Default", true);
+        return ThresholdConfig.manual(base.getMethod(), base.isDarkObjects(), minThreshold, maxThreshold);
+    }
+
+    public static ImagePlus buildMaskFromRois(Roi[] rois, int w, int h) {
+        // When ROI review changes the accepted shapes, batch mode regenerates the mask
+        // and labels from the final ROI set instead of re-running segmentation.
+        ImagePlus mask = IJ.createImage("Cell Mask", "8-bit black", w, h, 1);
+        ImageProcessor ip = mask.getProcessor();
+        if (rois != null) {
+            ip.setValue(255);
+            for (Roi roi : rois) {
+                if (roi != null) {
+                    ip.fill(roi);
+                }
+            }
+        }
+        return mask;
+    }
+
+    public static ImagePlus buildLabelsFromRois(Roi[] rois, int w, int h, String labelsLut) {
+        ImagePlus labels = buildLabelsFromRoisArray(rois, w, h);
+        labels.setTitle("Labels");
+        try {
+            applyLabelsLut(labels, labelsLut);
+            IJ.run(labels, "Enhance Contrast", "saturated=0");
+        } catch (Throwable ignored) { }
+        return labels;
+    }
+
+    private static CellSegmentationResult completeSegmentation(
+            ImagePlus work,
+            ImagePlus imp,
+            CellSegmentationParams p,
+            ThresholdConfig thresholdConfig,
+            ImagePlus gradientSnap,
+            boolean pauseThreshold) {
+
+        // From this point on, `work` is the full segmentation scratch image and `imp`
+        // remains the untouched source used for measurements/overlays.
         // 2) Threshold + optional pause
-        applyThreshold(work, p.thrMethod, p.darkObjects, p.pauseThreshold);
+        applyThreshold(work, thresholdConfig, pauseThreshold);
 
         // Convert current threshold to a binary mask.
         IJ.run(work, "Convert to Mask", "");
@@ -206,13 +284,14 @@ public final class CellSegmentationPipeline {
         work.setProcessor(base);
     }
 
-    private static void applyThreshold(ImagePlus work, String thrMethod, boolean darkObjects, boolean pauseThreshold) {
-        final String method = (thrMethod == null || thrMethod.trim().isEmpty()) ? "Default" : thrMethod.trim();
+    private static void applyThreshold(ImagePlus work, ThresholdConfig thresholdConfig, boolean pauseThreshold) {
+        final ThresholdConfig config = thresholdConfig != null
+                ? thresholdConfig
+                : ThresholdConfig.auto("Default", true);
 
-        final String darkOrLight = darkObjects ? "dark" : "light";
-
-        // Sets the threshold on the image based on the selected method and polarity.
-        IJ.setAutoThreshold(work, method + " " + darkOrLight);
+        // Applying the config here keeps threshold selection deterministic for batch mode
+        // while still supporting the original interactive "pause and adjust" flow.
+        config.applyTo(work);
 
         if (pauseThreshold) {
             // Needs an image window; if work wasn't shown, show it now.
@@ -240,6 +319,8 @@ public final class CellSegmentationPipeline {
             boolean showResultsTable,
             boolean showRoiManager) {
 
+        // ROI Manager is global state in IJ1. `clearRM` decides whether this run should
+        // start from an empty manager or append to whatever is already there.
         RoiManager rm = RoiManager.getInstance();
         if (rm == null) {
             rm = new RoiManager();
@@ -261,7 +342,8 @@ public final class CellSegmentationPipeline {
         ParticleAnalyzer pa = new ParticleAnalyzer(paOptions, 0, dummyRt, minArea, Double.POSITIVE_INFINITY);
         pa.analyze(binaryMask);
 
-        // Measure on original for meaningful intensity stats.
+        // Measure on the original grayscale image rather than the binary mask, because
+        // intensity statistics on the mask would be meaningless.
         Analyzer analyzer = new Analyzer(original, measurements, rt);
 
         Roi[] roisForMeasure = rm.getRoisAsArray();
@@ -279,11 +361,21 @@ public final class CellSegmentationPipeline {
     }
 
     private static ImagePlus buildLabelsFromRois(RoiManager rm, int w, int h) {
+        Roi[] rois = (rm == null) ? new Roi[0] : rm.getRoisAsArray();
+        return buildLabelsFromRoisArray(rois, w, h);
+    }
+
+    private static ImagePlus buildLabelsFromRoisArray(Roi[] rois, int w, int h) {
         ImagePlus labels = IJ.createImage("Labels", "16-bit black", w, h, 1);
         ImageProcessor ip = labels.getProcessor();
 
-        Roi[] rois = (rm == null) ? new Roi[0] : rm.getRoisAsArray();
+        if (rois == null) {
+            return labels;
+        }
         for (int i = 0; i < rois.length; i++) {
+            if (rois[i] == null) {
+                continue;
+            }
             ip.setValue(i + 1);
             ip.fill(rois[i]);
         }
@@ -389,15 +481,29 @@ public final class CellSegmentationPipeline {
 
     private static void closeIfVisible(ImagePlus imp) {
         if (imp != null && imp.getWindow() != null) {
-            imp.changes = false;
-            imp.close();
+            closeImageSafely(imp);
         }
     }
 
     private static void closeAlways(ImagePlus imp) {
         if (imp == null) return;
+        closeImageSafely(imp); // safe whether visible or not
+    }
+
+    private static void closeImageSafely(final ImagePlus imp) {
+        if (imp == null) return;
+        if (imp.getWindow() != null && !SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override
+                public void run() {
+                    imp.changes = false;
+                    imp.close();
+                }
+            });
+            return;
+        }
         imp.changes = false;
-        imp.close(); // safe whether visible or not
+        imp.close();
     }
 
     private static final class AnalysisResult {

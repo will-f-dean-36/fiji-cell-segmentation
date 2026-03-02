@@ -19,6 +19,8 @@ public class BioFormatsPlaneReader implements InputResolver.MetadataProvider {
     }
 
     private static final class FileMetadata {
+        // Metadata is cached per file path so repeated pair validation / plane opens do
+        // not keep re-reading the same container structure from disk.
         private final int seriesCount;
         private final SeriesMetadata[] series;
 
@@ -62,6 +64,8 @@ public class BioFormatsPlaneReader implements InputResolver.MetadataProvider {
     }
 
     public ImagePlus openPlane(File file, int seriesIndex, int channelIndex, int timeIndex) throws Exception {
+        // Bio-Formats can read arbitrarily large multidimensional containers; here we
+        // restrict it to a single plane so the batch loop only loads what it needs.
         final ImporterOptions options = new ImporterOptions();
         options.setId(file.getAbsolutePath());
         options.setQuiet(true);
@@ -92,6 +96,8 @@ public class BioFormatsPlaneReader implements InputResolver.MetadataProvider {
         FileMetadata md = cache.get(path);
         if (md != null) return md;
 
+        // `ImageReader` exposes metadata without materializing pixels, which keeps the
+        // input-resolution phase cheap compared with opening full images.
         final IFormatReader reader = new ImageReader();
         try {
             reader.setId(path);

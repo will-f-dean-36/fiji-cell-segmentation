@@ -6,6 +6,8 @@ import java.util.List;
 
 public final class InputResolver {
 
+    // The resolver is intentionally decoupled from Bio-Formats. It only needs enough
+    // metadata to map user-selected files into segmentation/measurement pairs.
     public interface MetadataProvider {
         int getSeriesCount(File file) throws Exception;
         SeriesMetadata getSeriesMetadata(File file, int seriesIndex) throws Exception;
@@ -25,6 +27,8 @@ public final class InputResolver {
             boolean allTimepoints,
             MetadataProvider metadataProvider) throws Exception {
 
+        // All three UI modes are normalized into the same `PairedUnit` model so the
+        // batch runner does not need mode-specific branching later.
         switch (mode) {
             case CONTAINER_SERIES_PAIR:
                 return resolveMode1(ricmContainerFile, fluorContainerFile, allTimepoints, metadataProvider);
@@ -61,6 +65,7 @@ public final class InputResolver {
 
         final List<PairedUnit> out = new ArrayList<PairedUnit>();
         for (int s = 0; s < ricmSeries; s++) {
+            // Mode 1 pairs container series by index: series 0 with series 0, etc.
             final SegUnit seg = new SegUnit(ricmContainerFile, s, 0);
             final SeriesMetadata measMeta = metadataProvider.getSeriesMetadata(fluorContainerFile, s);
             final int[] measChannels = channelsFromRangeExcluding(Math.max(1, measMeta.getSizeC()), 0, -1);
@@ -91,6 +96,7 @@ public final class InputResolver {
 
         final List<PairedUnit> out = new ArrayList<PairedUnit>();
         for (int i = 0; i < ricm.length; i++) {
+            // Mode 2 is a simple positional zip of two file lists.
             requireFile(ricm[i], "RICM file #" + (i + 1));
             requireFile(fluor[i], "Fluorescence file #" + (i + 1));
             final SegUnit seg = new SegUnit(ricm[i], 0, 0);
@@ -126,6 +132,8 @@ public final class InputResolver {
             final File file = files[i];
             requireFile(file, "Combined file #" + (i + 1));
 
+            // Mode 3 uses one file as both the segmentation source and measurement
+            // source, with channel ranges splitting the two roles.
             final SeriesMetadata meta = metadataProvider.getSeriesMetadata(file, 0);
             final int sizeC = Math.max(1, meta.getSizeC());
             if (segChannel >= sizeC) {
@@ -174,6 +182,8 @@ public final class InputResolver {
     }
 
     private static int[] channelsFromRangeExcluding(int sizeC, int startInclusive, int excluded) {
+        // Build a compact primitive array because the rest of the batch model stores
+        // channel indices as `int[]`, not boxed collections.
         final List<Integer> channels = new ArrayList<Integer>();
         final int start = Math.max(0, startInclusive);
         for (int c = start; c < sizeC; c++) {

@@ -13,6 +13,8 @@ public class CellSegmentation_IJ1 implements PlugIn {
     @Override
     public void run(String arg) {
 
+        // This is the classic IJ1 menu entry point. Its only job is to bridge from
+        // the old PlugIn API into the SciJava command that owns the real UI/logic.
         IJ.log("[CellSegmentation IJ1] Starting...");
         // Update log with path to JAR
         IJ.log("[CellSegmentation IJ1] run() jar=" + getClass().getProtectionDomain().getCodeSource().getLocation());
@@ -30,7 +32,8 @@ public class CellSegmentation_IJ1 implements PlugIn {
         final Context context = IJ1Helper.getLegacyContext();
         final CommandService cs = context.service(CommandService.class);
 
-        // true => show dialog; pass current image into the @Parameter ImagePlus imp
+        // `true` means "show the SciJava parameter dialog before running".
+        // Named arguments here map directly onto `@Parameter` fields in the command.
         cs.run(CellSegmentationCommand.class, true, "imp", imp);
     }
 }
