@@ -166,8 +166,8 @@ public class CellSegmentationCommand_Batch implements Command {
     private boolean measureFeret = true;
     private boolean measureShape = true;
     private boolean measureIntDen = true;
-    private final Map<String, BatchStopController.RoiReviewResult> roiReviewCache =
-            new HashMap<String, BatchStopController.RoiReviewResult>();
+    private final Map<String, CachedSegmentationResult> segmentationCache =
+            new HashMap<String, CachedSegmentationResult>();
     private final Map<String, ThresholdConfig> thresholdConfigCache =
             new HashMap<String, ThresholdConfig>();
 
@@ -271,7 +271,7 @@ public class CellSegmentationCommand_Batch implements Command {
             // Stop-point state is intentionally kept outside the pipeline so the core
             // image-processing code can stay mostly unaware of batch UI concerns.
             stopController = new BatchStopController();
-            roiReviewCache.clear();
+            segmentationCache.clear();
             thresholdConfigCache.clear();
             ThresholdConfig sharedThresholdConfig = ThresholdConfig.auto(thrMethod, darkObjects);
             boolean thresholdStopUsed = false;
@@ -286,16 +286,17 @@ public class CellSegmentationCommand_Batch implements Command {
                 final MeasUnit meas = pair.getMeasUnit();
                 final String pairBase = buildPairBaseName(pair, i);
                 final String segKey = buildSegUnitKey(seg);
-                final BatchStopController.RoiReviewResult cachedReview = roiReviewCache.get(segKey);
+                final String segBase = buildSegmentationBaseName(seg);
+                final CachedSegmentationResult cachedSegmentation = segmentationCache.get(segKey);
 
                 // If a previous pairing already reviewed this exact RICM source, reuse
                 // that decision (continue/skip/abort plus any edited ROIs).
-                if (cachedReview != null) {
-                    if (cachedReview.isAbort()) {
+                if (cachedSegmentation != null) {
+                    if (cachedSegmentation.isAbort()) {
                         aborted = true;
                         break;
                     }
-                    if (cachedReview.isSkip()) {
+                    if (cachedSegmentation.isSkip()) {
                         skippedPairs++;
                         IJ.log("[CellSegmentation Batch] Skip pair " + (i + 1) + " due to cached ROI skip: " + segKey);
                         continue;
@@ -304,8 +305,6 @@ public class CellSegmentationCommand_Batch implements Command {
 
                 ImagePlus segImp = null;
                 ImagePlus overlay = null;
-                ImagePlus outputMask = null;
-                ImagePlus outputLabels = null;
                 CellSegmentationResult result = null;
 
                 try {
@@ -318,76 +317,55 @@ public class CellSegmentationCommand_Batch implements Command {
                             + " C" + (seg.getSegChannelIndex() + 1)
                             + " meas=" + meas.getSource().getName() + " S" + (meas.getSeriesIndex() + 1));
 
-                    // Load exactly one segmentation plane per pair: series + channel, Z=0, T=0.
-                    segImp = reader.openPlane(seg.getSource(), seg.getSeriesIndex(), seg.getSegChannelIndex(), 0);
-                    final boolean stopForThreshold = shouldStopForThreshold(segKey, thresholdStopUsed);
-                    final ThresholdConfig pairThresholdConfig = chooseThresholdConfig(
-                            stopController,
-                            segImp,
-                            segKey,
-                            sharedThresholdConfig,
-                            stopForThreshold,
-                            i + 1,
-                            pairedUnits.size(),
-                            seg);
-                    if (stopForThreshold && isThresholdStopOnce()) {
-                        sharedThresholdConfig = pairThresholdConfig;
-                        thresholdStopUsed = true;
-                    }
-
-                    // Segmentation always runs before ROI review; ROI review can then
-                    // accept, modify, or reject the proposed ROI set.
-                    result = CellSegmentationPipeline.run(segImp, p, pairThresholdConfig);
-
-                    final Roi[] proposedRois = result.roiManager != null ? cloneRois(result.roiManager.getRoisAsArray()) : new Roi[0];
-                    final BatchStopController.RoiReviewResult reviewed = resolveReviewedRois(
-                            stopController,
-                            cachedReview,
-                            segKey,
-                            segImp,
-                            proposedRois,
-                            i + 1,
-                            pairedUnits.size(),
-                            seg);
-
-                    if (reviewed.isAbort()) {
-                        aborted = true;
-                        IJ.log("[CellSegmentation Batch] Aborted by user during ROI review: " + segKey);
-                        break;
-                    }
-                    if (reviewed.isSkip()) {
-                        skippedPairs++;
-                        IJ.log("[CellSegmentation Batch] Skipping pair " + (i + 1) + " after ROI review: " + segKey);
-                        continue;
-                    }
-
-                    final Roi[] finalRois = reviewed.getRois();
-                    // If the user edited ROIs, regenerate saved mask/labels so exported
-                    // artifacts match the reviewed shapes rather than the raw proposal.
-                    final boolean roiReviewEnabled = isRoiReviewEnabled();
-                    if (roiReviewEnabled) {
-                        outputMask = CellSegmentationPipeline.buildMaskFromRois(finalRois, segImp.getWidth(), segImp.getHeight());
-                        outputLabels = CellSegmentationPipeline.buildLabelsFromRois(finalRois, segImp.getWidth(), segImp.getHeight(), labelsLut);
-                    } else {
-                        outputMask = result.mask;
-                        outputLabels = result.labels;
-                    }
-
-                    if (saveMask && outputMask != null) {
-                        saveImage(outputMask, new File(outputDir, pairBase + "_mask.tif"));
-                    }
-                    if (saveLabels && outputLabels != null) {
-                        saveImage(outputLabels, new File(outputDir, pairBase + "_labels.tif"));
-                    }
-                    if (saveLabelOverlay && outputLabels != null) {
-                        overlay = CellSegmentationPipeline.createLabelOverlay(segImp, outputLabels, labelsLut);
-                        if (overlay != null) {
-                            saveImage(overlay, new File(outputDir, pairBase + "_overlay.tif"));
+                    CachedSegmentationResult finalSegmentation = cachedSegmentation;
+                    if (finalSegmentation == null) {
+                        // Load exactly one segmentation plane per unique RICM: series + channel, Z=0, T=0.
+                        segImp = reader.openPlane(seg.getSource(), seg.getSeriesIndex(), seg.getSegChannelIndex(), 0);
+                        final boolean stopForThreshold = shouldStopForThreshold(segKey, thresholdStopUsed);
+                        final ThresholdConfig pairThresholdConfig = chooseThresholdConfig(
+                                stopController,
+                                segImp,
+                                segKey,
+                                sharedThresholdConfig,
+                                stopForThreshold,
+                                i + 1,
+                                pairedUnits.size(),
+                                seg);
+                        if (stopForThreshold && isThresholdStopOnce()) {
+                            sharedThresholdConfig = pairThresholdConfig;
+                            thresholdStopUsed = true;
                         }
+
+                        // Segmentation always runs before ROI review; ROI review can then
+                        // accept, modify, or reject the proposed ROI set.
+                        result = CellSegmentationPipeline.run(segImp, p, pairThresholdConfig);
+
+                        final Roi[] proposedRois = result.roiManager != null ? cloneRois(result.roiManager.getRoisAsArray()) : new Roi[0];
+                        finalSegmentation = resolveSegmentationResult(
+                                stopController,
+                                segKey,
+                                segImp,
+                                proposedRois,
+                                i + 1,
+                                pairedUnits.size(),
+                                seg);
+                        segmentationCache.put(segKey, finalSegmentation);
+
+                        if (finalSegmentation.isAbort()) {
+                            aborted = true;
+                            IJ.log("[CellSegmentation Batch] Aborted by user during ROI review: " + segKey);
+                            break;
+                        }
+                        if (finalSegmentation.isSkip()) {
+                            skippedPairs++;
+                            IJ.log("[CellSegmentation Batch] Skipping pair " + (i + 1) + " after ROI review: " + segKey);
+                            continue;
+                        }
+
+                        saveSegmentationOutputs(segImp, segBase, finalSegmentation.getRois());
                     }
-                    if (saveRois) {
-                        saveRois(finalRois, new File(outputDir, pairBase + "_rois.zip"));
-                    }
+
+                    final Roi[] finalRois = finalSegmentation.getRois();
 
                     if (saveMeasurements) {
                         final SeriesMetadata measMeta = reader.getSeriesMetadata(meas.getSource(), meas.getSeriesIndex());
@@ -436,12 +414,6 @@ public class CellSegmentationCommand_Batch implements Command {
                     IJ.handleException(pairEx);
                 } finally {
                     closeImage(overlay);
-                    if (outputMask != null && outputMask != (result != null ? result.mask : null)) {
-                        closeImage(outputMask);
-                    }
-                    if (outputLabels != null && outputLabels != (result != null ? result.labels : null)) {
-                        closeImage(outputLabels);
-                    }
                     closeImage(result != null ? result.mask : null);
                     closeImage(result != null ? result.labels : null);
                     closeImage(segImp);
@@ -717,9 +689,8 @@ public class CellSegmentationCommand_Batch implements Command {
         }
     }
 
-    private BatchStopController.RoiReviewResult resolveReviewedRois(
+    private CachedSegmentationResult resolveSegmentationResult(
             BatchStopController stopController,
-            BatchStopController.RoiReviewResult cachedReview,
             String segKey,
             ImagePlus segImp,
             Roi[] proposedRois,
@@ -727,14 +698,8 @@ public class CellSegmentationCommand_Batch implements Command {
             int totalPairs,
             SegUnit seg) {
 
-        if (cachedReview != null) {
-            // Reuse ROI edits or skip/abort decisions for every pairing that shares the
-            // same segmentation source.
-            return cachedReview;
-        }
-
         if (!isRoiReviewEnabled()) {
-            return BatchStopController.RoiReviewResult.continueWith(proposedRois);
+            return CachedSegmentationResult.continueWith(proposedRois);
         }
 
         final BatchStopController.RoiReviewResult reviewed = stopController.maybeReviewRois(
@@ -742,14 +707,62 @@ public class CellSegmentationCommand_Batch implements Command {
                 segImp,
                 proposedRois,
                 buildRoiReviewTitle(pairIndex1, totalPairs, seg));
-        roiReviewCache.put(segKey, reviewed);
-        return reviewed;
+        if (reviewed.isAbort()) {
+            return CachedSegmentationResult.abort();
+        }
+        if (reviewed.isSkip()) {
+            return CachedSegmentationResult.skip();
+        }
+        return CachedSegmentationResult.continueWith(reviewed.getRois());
+    }
+
+    private void saveSegmentationOutputs(ImagePlus segImp, String segBase, Roi[] finalRois) {
+        if ((!saveMask && !saveLabels && !saveLabelOverlay && !saveRois) || segImp == null) {
+            return;
+        }
+
+        ImagePlus outputMask = null;
+        ImagePlus outputLabels = null;
+        ImagePlus outputOverlay = null;
+        try {
+            if (saveMask || saveLabelOverlay) {
+                outputMask = CellSegmentationPipeline.buildMaskFromRois(finalRois, segImp.getWidth(), segImp.getHeight());
+            }
+            if (saveLabels || saveLabelOverlay) {
+                outputLabels = CellSegmentationPipeline.buildLabelsFromRois(finalRois, segImp.getWidth(), segImp.getHeight(), labelsLut);
+            }
+            if (saveMask && outputMask != null) {
+                saveImage(outputMask, new File(outputDir, segBase + "_mask.tif"));
+            }
+            if (saveLabels && outputLabels != null) {
+                saveImage(outputLabels, new File(outputDir, segBase + "_labels.tif"));
+            }
+            if (saveLabelOverlay && outputLabels != null) {
+                outputOverlay = CellSegmentationPipeline.createLabelOverlay(segImp, outputLabels, labelsLut);
+                if (outputOverlay != null) {
+                    saveImage(outputOverlay, new File(outputDir, segBase + "_overlay.tif"));
+                }
+            }
+            if (saveRois) {
+                saveRois(finalRois, new File(outputDir, segBase + "_rois.zip"));
+            }
+        } finally {
+            closeImage(outputOverlay);
+            closeImage(outputLabels);
+            closeImage(outputMask);
+        }
     }
 
     private static String buildSegUnitKey(SegUnit seg) {
         return seg.getSource().getAbsolutePath()
                 + "|s=" + seg.getSeriesIndex()
                 + "|c=" + seg.getSegChannelIndex();
+    }
+
+    private static String buildSegmentationBaseName(SegUnit seg) {
+        return stripExtension(seg.getSource().getName())
+                + "_S" + (seg.getSeriesIndex() + 1)
+                + "_C" + (seg.getSegChannelIndex() + 1);
     }
 
     private static String buildThresholdTitle(int pairIndex1, int totalPairs, SegUnit seg) {
@@ -771,5 +784,39 @@ public class CellSegmentationCommand_Batch implements Command {
             cloned[i] = rois[i] != null ? (Roi) rois[i].clone() : null;
         }
         return cloned;
+    }
+
+    private static final class CachedSegmentationResult {
+        private final BatchStopController.RoiReviewAction action;
+        private final Roi[] rois;
+
+        private CachedSegmentationResult(BatchStopController.RoiReviewAction action, Roi[] rois) {
+            this.action = action;
+            this.rois = cloneRois(rois);
+        }
+
+        private static CachedSegmentationResult continueWith(Roi[] rois) {
+            return new CachedSegmentationResult(BatchStopController.RoiReviewAction.CONTINUE, rois);
+        }
+
+        private static CachedSegmentationResult skip() {
+            return new CachedSegmentationResult(BatchStopController.RoiReviewAction.SKIP, null);
+        }
+
+        private static CachedSegmentationResult abort() {
+            return new CachedSegmentationResult(BatchStopController.RoiReviewAction.ABORT, null);
+        }
+
+        private boolean isSkip() {
+            return action == BatchStopController.RoiReviewAction.SKIP;
+        }
+
+        private boolean isAbort() {
+            return action == BatchStopController.RoiReviewAction.ABORT;
+        }
+
+        private Roi[] getRois() {
+            return cloneRois(rois);
+        }
     }
 }
