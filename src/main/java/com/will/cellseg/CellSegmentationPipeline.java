@@ -112,6 +112,7 @@ public final class CellSegmentationPipeline {
         // That mirrors the same logical stop-point used in the interactive pipeline.
         ImagePlus work = duplicateForProcessing(imp, show);
         applyEdgeDetector(work, edgeDetector);
+        normalizeToUnitRange(work);
         // Gradient images often start with stale display limits inherited from the
         // source image, so reset them to the actual gradient dynamic range.
         autoAdjustDisplayRange(work);
@@ -318,6 +319,39 @@ public final class CellSegmentationPipeline {
             out[i] = Math.abs(out[i]);
         }
         work.setProcessor(base);
+    }
+
+    private static void normalizeToUnitRange(ImagePlus work) {
+        if (work == null || work.getProcessor() == null) {
+            return;
+        }
+
+        final FloatProcessor normalized = work.getProcessor().convertToFloatProcessor();
+        final float[] pixels = (float[]) normalized.getPixels();
+        if (pixels == null || pixels.length == 0) {
+            work.setProcessor(normalized);
+            return;
+        }
+
+        float min = Float.POSITIVE_INFINITY;
+        float max = Float.NEGATIVE_INFINITY;
+        for (float value : pixels) {
+            if (value < min) min = value;
+            if (value > max) max = value;
+        }
+
+        final float range = max - min;
+        if (range <= 0f) {
+            for (int i = 0; i < pixels.length; i++) {
+                pixels[i] = 0f;
+            }
+        } else {
+            for (int i = 0; i < pixels.length; i++) {
+                pixels[i] = (pixels[i] - min) / range;
+            }
+        }
+
+        work.setProcessor(normalized);
     }
 
     private static void autoAdjustDisplayRange(ImagePlus work) {
