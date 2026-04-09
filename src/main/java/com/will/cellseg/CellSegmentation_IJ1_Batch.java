@@ -72,10 +72,10 @@ public class CellSegmentation_IJ1_Batch implements PlugIn {
         // still owns the segmentation parameters (threshold method, measurements, etc.).
         final GenericDialog gd = new GenericDialog("Batch Input Mode");
         gd.addChoice("Input mode", MODE_LABELS, MODE_LABELS[0]);
-        gd.addNumericField("Mode 3 RICM channel (1-based)", 1, 0);
-        gd.addNumericField("Mode 3 first fluorescence channel (1-based)", 2, 0);
-        gd.addChoice("Threshold Stop Mode", THRESHOLD_STOP_LABELS, THRESHOLD_STOP_LABELS[0]);
-        gd.addChoice("ROI Review Mode", ROI_REVIEW_LABELS, ROI_REVIEW_LABELS[0]);
+        gd.addNumericField("Mode 3 RICM channel", 1, 0);
+        gd.addNumericField("Mode 3 first fluorescence channel", 2, 0);
+        gd.addChoice("Threshold Review", THRESHOLD_STOP_LABELS, THRESHOLD_STOP_LABELS[0]);
+        gd.addChoice("ROI Review", ROI_REVIEW_LABELS, ROI_REVIEW_LABELS[0]);
         gd.addMessage("Batch stop-points are optional. Bio-Formats dialogs are disabled.");
         gd.showDialog();
         if (gd.wasCanceled()) return null;
