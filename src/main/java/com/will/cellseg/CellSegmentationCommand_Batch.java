@@ -138,6 +138,9 @@ public class CellSegmentationCommand_Batch implements Command {
     )
     private String labelsLut = "Rainbow RGB";
 
+    @Parameter(label = "Exclude cells touching image border")
+    private boolean excludeBorderTouching = false;
+
     @Parameter(label = "Measurements...", callback = "editMeasurements")
     private Button editMeasurements;
 
@@ -261,6 +264,7 @@ public class CellSegmentationCommand_Batch implements Command {
                     false,
                     false,
                     true,
+                    excludeBorderTouching,
                     edgeDetector,
                     measurements,
                     labelsLut,

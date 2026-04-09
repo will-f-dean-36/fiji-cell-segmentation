@@ -73,6 +73,9 @@ public class CellSegmentationCommand implements Command {
     @Parameter(label = "Clear ROI Manager first")
     private boolean clearRM = true;
 
+    @Parameter(label = "Exclude cells touching image border")
+    private boolean excludeBorderTouching = false;
+
     @Parameter(label = "Measurements...", callback = "editMeasurements")
     private Button editMeasurements;
 
@@ -126,6 +129,7 @@ public class CellSegmentationCommand implements Command {
                 showSteps,
                 showLabelOverlay,
                 clearRM,
+                excludeBorderTouching,
                 edgeDetector,
                 measurements,
                 labelsLut,

@@ -24,6 +24,8 @@ import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -209,7 +211,14 @@ public final class CellSegmentationPipeline {
 
         // 5) Analyze particles on mask, then measure on the original image.
         AnalysisResult analysis = analyzeParticlesAndMeasureOnOriginal(
-                work, imp, p.minArea, p.clearRM, p.measurements, p.showResultsTable, p.showRoiManager);
+                work,
+                imp,
+                p.minArea,
+                p.clearRM,
+                p.excludeBorderTouching,
+                p.measurements,
+                p.showResultsTable,
+                p.showRoiManager);
         RoiManager rm = analysis.roiManager;
         ResultsTable rt = analysis.resultsTable;
 
@@ -442,6 +451,7 @@ public final class CellSegmentationPipeline {
             ImagePlus original,
             int minArea,
             boolean clearRM,
+            boolean excludeBorderTouching,
             int measurements,
             boolean showResultsTable,
             boolean showRoiManager) {
@@ -472,6 +482,10 @@ public final class CellSegmentationPipeline {
         ParticleAnalyzer pa = new ParticleAnalyzer(paOptions, 0, dummyRt, minArea, Double.POSITIVE_INFINITY);
         pa.analyze(binaryMask);
 
+        if (excludeBorderTouching) {
+            filterBorderTouchingRois(rm, binaryMask.getWidth(), binaryMask.getHeight());
+        }
+
         // Measure on the original grayscale image rather than the binary mask, because
         // intensity statistics on the mask would be meaningless.
         Analyzer analyzer = new Analyzer(original, measurements, rt);
@@ -488,6 +502,41 @@ public final class CellSegmentationPipeline {
         }
 
         return new AnalysisResult(rm, rt);
+    }
+
+    private static void filterBorderTouchingRois(RoiManager roiManager, int width, int height) {
+        if (roiManager == null || width <= 0 || height <= 0) {
+            return;
+        }
+
+        final Roi[] rois = roiManager.getRoisAsArray();
+        if (rois == null || rois.length == 0) {
+            return;
+        }
+
+        final List<Roi> kept = new ArrayList<Roi>(rois.length);
+        for (Roi roi : rois) {
+            if (roi == null || touchesImageBorder(roi, width, height)) {
+                continue;
+            }
+            kept.add(roi);
+        }
+
+        roiManager.reset();
+        for (Roi roi : kept) {
+            roiManager.addRoi(roi);
+        }
+    }
+
+    private static boolean touchesImageBorder(Roi roi, int width, int height) {
+        if (roi == null) {
+            return false;
+        }
+        final Rectangle bounds = roi.getBounds();
+        return bounds.x <= 0
+                || bounds.y <= 0
+                || bounds.x + bounds.width >= width
+                || bounds.y + bounds.height >= height;
     }
 
     private static ImagePlus buildLabelsFromRois(RoiManager rm, int w, int h) {

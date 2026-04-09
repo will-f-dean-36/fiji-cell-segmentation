@@ -9,6 +9,7 @@ public final class CellSegmentationParams {
     public final boolean showSteps;
     public final boolean showLabelOverlay;
     public final boolean clearRM;
+    public final boolean excludeBorderTouching;
     public final EdgeDetector edgeDetector;
     public final int measurements;
     public final String labelsLut;
@@ -23,6 +24,7 @@ public final class CellSegmentationParams {
             boolean showSteps,
             boolean showLabelOverlay,
             boolean clearRM,
+            boolean excludeBorderTouching,
             EdgeDetector edgeDetector,
             int measurements,
             String labelsLut,
@@ -36,6 +38,7 @@ public final class CellSegmentationParams {
         this.showSteps = showSteps;
         this.showLabelOverlay = showLabelOverlay;
         this.clearRM = clearRM;
+        this.excludeBorderTouching = excludeBorderTouching;
         this.edgeDetector = edgeDetector;
         this.measurements = measurements;
         this.labelsLut = labelsLut;
