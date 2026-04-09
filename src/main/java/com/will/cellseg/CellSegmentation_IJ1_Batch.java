@@ -14,14 +14,13 @@ import org.scijava.command.CommandService;
 public class CellSegmentation_IJ1_Batch implements PlugIn {
 
     private static final String[] THRESHOLD_STOP_LABELS = new String[] {
-            "Don't stop",
-            "Stop once (set and apply to all)",
-            "Stop once per unique RICM"
+            "No",
+            "Yes"
     };
 
     private static final String[] ROI_REVIEW_LABELS = new String[] {
-            "Don't stop",
-            "Stop once per unique RICM"
+            "No",
+            "Yes"
     };
 
     private static final String[] MODE_LABELS = new String[] {

@@ -18,6 +18,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -32,6 +33,7 @@ public final class BatchStopController {
     // existing one or create one once and keep reusing it for the whole batch run.
     private RoiManager reviewRoiManager;
     private boolean reviewRoiManagerOwned;
+    private boolean rememberThreshold = true;
 
     public ThresholdSelectionResult maybeSelectThreshold(
             Context ctx,
@@ -40,12 +42,12 @@ public final class BatchStopController {
             final String title) {
 
         if (ricmPreview == null) {
-            return ThresholdSelectionResult.continueWith(currentOrDefault);
+            return ThresholdSelectionResult.continueWith(currentOrDefault, rememberThreshold);
         }
 
         final CountDownLatch latch = new CountDownLatch(1);
         final AtomicReference<ThresholdSelectionResult> selected =
-                new AtomicReference<ThresholdSelectionResult>(ThresholdSelectionResult.continueWith(currentOrDefault));
+                new AtomicReference<ThresholdSelectionResult>(ThresholdSelectionResult.continueWith(currentOrDefault, rememberThreshold));
         final AtomicBoolean completed = new AtomicBoolean(false);
 
         // UI creation and updates must happen on the Swing EDT. The batch worker thread
@@ -67,12 +69,31 @@ public final class BatchStopController {
                 // This is intentionally a tiny controller dialog. The real threshold UI
                 // is still ImageJ's standard Threshold window.
                 final JDialog dialog = createDialog(title, "Adjust the threshold, then choose an action.", false);
+                final JCheckBox rememberBox = new JCheckBox("Remember threshold", rememberThreshold);
+                rememberBox.setBorder(new EmptyBorder(0, 16, 4, 16));
+                dialog.add(rememberBox, BorderLayout.CENTER);
                 final Runnable continueRun = new Runnable() {
                     @Override
                     public void run() {
                         if (completed.compareAndSet(false, true)) {
+                            rememberThreshold = rememberBox.isSelected();
                             selected.set(ThresholdSelectionResult.continueWith(
-                                    CellSegmentationPipeline.captureThresholdConfig(ricmPreview, currentOrDefault)));
+                                    CellSegmentationPipeline.captureThresholdConfig(ricmPreview, currentOrDefault),
+                                    rememberThreshold));
+                            dialog.dispose();
+                            latch.countDown();
+                        }
+                    }
+                };
+
+                final Runnable continueToEndRun = new Runnable() {
+                    @Override
+                    public void run() {
+                        if (completed.compareAndSet(false, true)) {
+                            rememberThreshold = rememberBox.isSelected();
+                            selected.set(ThresholdSelectionResult.continueToEnd(
+                                    CellSegmentationPipeline.captureThresholdConfig(ricmPreview, currentOrDefault),
+                                    rememberThreshold));
                             dialog.dispose();
                             latch.countDown();
                         }
@@ -83,6 +104,7 @@ public final class BatchStopController {
                     @Override
                     public void run() {
                         if (completed.compareAndSet(false, true)) {
+                            rememberThreshold = rememberBox.isSelected();
                             selected.set(ThresholdSelectionResult.skip());
                             dialog.dispose();
                             latch.countDown();
@@ -103,11 +125,13 @@ public final class BatchStopController {
 
                 JButton continueButton = new JButton("Continue");
                 continueButton.addActionListener(e -> continueRun.run());
+                JButton continueToEndButton = new JButton("Continue to end");
+                continueToEndButton.addActionListener(e -> continueToEndRun.run());
                 JButton skipButton = new JButton("Skip");
                 skipButton.addActionListener(e -> skipRun.run());
                 JButton abortButton = new JButton("Abort");
                 abortButton.addActionListener(e -> abortRun.run());
-                dialog.add(buttonPanel(continueButton, skipButton, abortButton), BorderLayout.SOUTH);
+                dialog.add(buttonPanel(continueButton, continueToEndButton, skipButton, abortButton), BorderLayout.SOUTH);
                 dialog.addWindowListener(new WindowAdapter() {
                     @Override
                     public void windowClosing(WindowEvent e) {
@@ -126,6 +150,7 @@ public final class BatchStopController {
                 + " action=" + result.getAction().name()
                 + (result.isContinue()
                 ? " mode=" + (result.getConfig() != null && result.getConfig().isManual() ? "manual" : "auto")
+                + " remember=" + result.shouldRememberThreshold()
                 : ""));
         return result;
     }
@@ -186,6 +211,18 @@ public final class BatchStopController {
                     }
                 };
 
+                final Runnable continueToEndRun = new Runnable() {
+                    @Override
+                    public void run() {
+                        if (completed.compareAndSet(false, true)) {
+                            result.set(RoiReviewResult.continueToEnd(roiManager.getRoisAsArray()));
+                            cleanup.run();
+                            dialog.dispose();
+                            latch.countDown();
+                        }
+                    }
+                };
+
                 final Runnable skipRun = new Runnable() {
                     @Override
                     public void run() {
@@ -212,11 +249,13 @@ public final class BatchStopController {
 
                 JButton continueButton = new JButton("Continue");
                 continueButton.addActionListener(e -> continueRun.run());
+                JButton continueToEndButton = new JButton("Continue to end");
+                continueToEndButton.addActionListener(e -> continueToEndRun.run());
                 JButton skipButton = new JButton("Skip");
                 skipButton.addActionListener(e -> skipRun.run());
                 JButton abortButton = new JButton("Abort");
                 abortButton.addActionListener(e -> abortRun.run());
-                dialog.add(buttonPanel(continueButton, skipButton, abortButton), BorderLayout.SOUTH);
+                dialog.add(buttonPanel(continueButton, continueToEndButton, skipButton, abortButton), BorderLayout.SOUTH);
                 dialog.addWindowListener(new WindowAdapter() {
                     @Override
                     public void windowClosing(WindowEvent e) {
@@ -250,7 +289,7 @@ public final class BatchStopController {
         // HTML text is the simplest way to get multi-line centered text in a Swing label.
         final JLabel label = new JLabel("<html><div style='text-align:center;'>" + message + "</div></html>", SwingConstants.CENTER);
         label.setBorder(new EmptyBorder(12, 16, 4, 16));
-        dialog.add(label, BorderLayout.CENTER);
+        dialog.add(label, BorderLayout.NORTH);
         dialog.setAlwaysOnTop(alwaysOnTop);
         dialog.pack();
         final Dimension size = dialog.getSize();
@@ -328,6 +367,10 @@ public final class BatchStopController {
             return new RoiReviewResult(RoiReviewAction.CONTINUE, rois);
         }
 
+        public static RoiReviewResult continueToEnd(Roi[] rois) {
+            return new RoiReviewResult(RoiReviewAction.CONTINUE_TO_END, rois);
+        }
+
         public static RoiReviewResult skip() {
             return new RoiReviewResult(RoiReviewAction.SKIP, null);
         }
@@ -341,7 +384,11 @@ public final class BatchStopController {
         }
 
         public boolean isContinue() {
-            return action == RoiReviewAction.CONTINUE;
+            return action == RoiReviewAction.CONTINUE || action == RoiReviewAction.CONTINUE_TO_END;
+        }
+
+        public boolean isContinueToEnd() {
+            return action == RoiReviewAction.CONTINUE_TO_END;
         }
 
         public boolean isSkip() {
@@ -360,22 +407,28 @@ public final class BatchStopController {
     public static final class ThresholdSelectionResult {
         private final RoiReviewAction action;
         private final ThresholdConfig config;
+        private final boolean rememberThreshold;
 
-        private ThresholdSelectionResult(RoiReviewAction action, ThresholdConfig config) {
+        private ThresholdSelectionResult(RoiReviewAction action, ThresholdConfig config, boolean rememberThreshold) {
             this.action = action;
             this.config = config;
+            this.rememberThreshold = rememberThreshold;
         }
 
-        public static ThresholdSelectionResult continueWith(ThresholdConfig config) {
-            return new ThresholdSelectionResult(RoiReviewAction.CONTINUE, config);
+        public static ThresholdSelectionResult continueWith(ThresholdConfig config, boolean rememberThreshold) {
+            return new ThresholdSelectionResult(RoiReviewAction.CONTINUE, config, rememberThreshold);
+        }
+
+        public static ThresholdSelectionResult continueToEnd(ThresholdConfig config, boolean rememberThreshold) {
+            return new ThresholdSelectionResult(RoiReviewAction.CONTINUE_TO_END, config, rememberThreshold);
         }
 
         public static ThresholdSelectionResult skip() {
-            return new ThresholdSelectionResult(RoiReviewAction.SKIP, null);
+            return new ThresholdSelectionResult(RoiReviewAction.SKIP, null, false);
         }
 
         public static ThresholdSelectionResult abort() {
-            return new ThresholdSelectionResult(RoiReviewAction.ABORT, null);
+            return new ThresholdSelectionResult(RoiReviewAction.ABORT, null, false);
         }
 
         public RoiReviewAction getAction() {
@@ -383,7 +436,11 @@ public final class BatchStopController {
         }
 
         public boolean isContinue() {
-            return action == RoiReviewAction.CONTINUE;
+            return action == RoiReviewAction.CONTINUE || action == RoiReviewAction.CONTINUE_TO_END;
+        }
+
+        public boolean isContinueToEnd() {
+            return action == RoiReviewAction.CONTINUE_TO_END;
         }
 
         public boolean isSkip() {
@@ -397,10 +454,15 @@ public final class BatchStopController {
         public ThresholdConfig getConfig() {
             return config;
         }
+
+        public boolean shouldRememberThreshold() {
+            return rememberThreshold;
+        }
     }
 
     public enum RoiReviewAction {
         CONTINUE,
+        CONTINUE_TO_END,
         SKIP,
         ABORT
     }
