@@ -496,8 +496,9 @@ public class CellSegmentationCommand_Batch implements Command {
             InputMode mode,
             BioFormatsPlaneReader reader) {
 
-        // Mode 2 initially leaves measurement channels unspecified. After we read file
-        // metadata, expand that into "all channels" so downstream code is uniform.
+        // File-list fluorescence mode initially leaves measurement channels unspecified.
+        // After we read file metadata, expand that into "all channels" so downstream
+        // code is uniform.
         if (mode != InputMode.FILE_LIST_PAIR) {
             return pairs;
         }
@@ -634,10 +635,16 @@ public class CellSegmentationCommand_Batch implements Command {
         if (modeName == null) {
             return 0;
         }
-        if (InputMode.FILE_LIST_PAIR.name().equalsIgnoreCase(modeName)) {
+        if (InputMode.RICM_CONTAINER_SERIES.name().equalsIgnoreCase(modeName)) {
             return 1;
         }
+        if (InputMode.FILE_LIST_PAIR.name().equalsIgnoreCase(modeName)) {
+            return 3;
+        }
         if (InputMode.SAME_FILE_CHANNELS.name().equalsIgnoreCase(modeName)) {
+            return 4;
+        }
+        if (InputMode.CONTAINER_SERIES_PAIR.name().equalsIgnoreCase(modeName)) {
             return 2;
         }
         return 0;
@@ -646,12 +653,16 @@ public class CellSegmentationCommand_Batch implements Command {
     private static String indexToInputModeName(int index) {
         switch (index) {
             case 1:
-                return InputMode.FILE_LIST_PAIR.name();
+                return InputMode.RICM_CONTAINER_SERIES.name();
             case 2:
+                return InputMode.CONTAINER_SERIES_PAIR.name();
+            case 3:
+                return InputMode.FILE_LIST_PAIR.name();
+            case 4:
                 return InputMode.SAME_FILE_CHANNELS.name();
             case 0:
             default:
-                return InputMode.CONTAINER_SERIES_PAIR.name();
+                return InputMode.RICM_FILE_LIST.name();
         }
     }
 

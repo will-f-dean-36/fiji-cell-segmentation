@@ -33,9 +33,11 @@ import javax.swing.event.ChangeListener;
 public final class BatchSegmentationDialog extends JDialog {
     private static final String INPUT_DIR_PREF = "cellseg.batchInputDir";
     private static final String[] INPUT_MODE_LABELS = {
-            "Mode 1: Two container files (pair by series index)",
-            "Mode 2: Two file lists (pair by selection order)",
-            "Mode 3: Same-file channels (C1=RICM, C2..=Fluor)"
+            "Mode 1: RICM file list",
+            "Mode 2: RICM container (each series is one RICM)",
+            "Mode 3: Two container files (pair by series index)",
+            "Mode 4: Two file lists (pair by selection order)",
+            "Mode 5: Same-file channels (C1=RICM, C2..=Fluor)"
     };
     private static final String[] YES_NO = {"No", "Yes"};
     private static final String[] THRESHOLD_METHODS = {
@@ -75,6 +77,8 @@ public final class BatchSegmentationDialog extends JDialog {
     private static final String CARD_MODE1 = "mode1";
     private static final String CARD_MODE2 = "mode2";
     private static final String CARD_MODE3 = "mode3";
+    private static final String CARD_MODE4 = "mode4";
+    private static final String CARD_MODE5 = "mode5";
 
     private Result result;
     private final JComboBox<String> inputModeBox;
@@ -83,11 +87,15 @@ public final class BatchSegmentationDialog extends JDialog {
     private final JLabel segChannelLabel;
     private final JLabel firstMeasChannelLabel;
     private final JPanel inputModeCards;
+    private final JList<String> ricmOnlyContainerList;
+    private final JList<String> ricmOnlyFilesList;
     private final JList<String> ricmContainerList;
     private final JList<String> fluorContainerList;
     private final JList<String> ricmFilesList;
     private final JList<String> fluorFilesList;
     private final JList<String> combinedFilesList;
+    private File ricmOnlyContainerFile;
+    private File[] ricmOnlyFiles;
     private File ricmContainerFile;
     private File fluorContainerFile;
     private File[] ricmFiles;
@@ -139,20 +147,26 @@ public final class BatchSegmentationDialog extends JDialog {
         firstMeasChannelSpinner = new JSpinner(new SpinnerNumberModel(initial.sameFileFirstMeasChannelIndex1Based, 1, Integer.MAX_VALUE, 1));
         segChannelLabel = new JLabel("Mode 3 RICM channel");
         firstMeasChannelLabel = new JLabel("Mode 3 first fluorescence channel");
+        ricmOnlyContainerFile = null;
+        ricmOnlyFiles = null;
         ricmContainerFile = initial.ricmContainerFile;
         fluorContainerFile = initial.fluorContainerFile;
         ricmFiles = cloneFiles(initial.ricmFiles);
         fluorFiles = cloneFiles(initial.fluorFiles);
         combinedFiles = cloneFiles(initial.combinedFiles);
+        ricmOnlyContainerList = new JList<String>();
+        ricmOnlyFilesList = new JList<String>();
         ricmContainerList = new JList<String>();
         fluorContainerList = new JList<String>();
         ricmFilesList = new JList<String>();
         fluorFilesList = new JList<String>();
         combinedFilesList = new JList<String>();
         inputModeCards = new JPanel(new CardLayout());
-        inputModeCards.add(buildMode1Panel(), CARD_MODE1);
-        inputModeCards.add(buildMode2Panel(), CARD_MODE2);
-        inputModeCards.add(buildMode3Panel(), CARD_MODE3);
+        inputModeCards.add(buildRicmFileListPanel(), CARD_MODE1);
+        inputModeCards.add(buildRicmContainerPanel(), CARD_MODE2);
+        inputModeCards.add(buildMode1Panel(), CARD_MODE3);
+        inputModeCards.add(buildMode2Panel(), CARD_MODE4);
+        inputModeCards.add(buildMode3Panel(), CARD_MODE5);
         inputModeBox.addActionListener(e -> updateInputModeCard());
         refreshFileLists();
 
@@ -344,14 +358,39 @@ public final class BatchSegmentationDialog extends JDialog {
             JOptionPane.showMessageDialog(this, "Please select the required input files for the chosen mode.", "Missing Inputs", JOptionPane.ERROR_MESSAGE);
             return;
         }
+        final File resultRicmContainer;
+        final File resultFluorContainer;
+        final File[] resultRicmFiles;
+        final File[] resultFluorFiles;
+        switch (inputModeBox.getSelectedIndex()) {
+            case 0:
+                resultRicmContainer = null;
+                resultFluorContainer = null;
+                resultRicmFiles = cloneFiles(ricmOnlyFiles);
+                resultFluorFiles = null;
+                break;
+            case 1:
+                resultRicmContainer = ricmOnlyContainerFile;
+                resultFluorContainer = null;
+                resultRicmFiles = null;
+                resultFluorFiles = null;
+                break;
+            default:
+                resultRicmContainer = ricmContainerFile;
+                resultFluorContainer = fluorContainerFile;
+                resultRicmFiles = cloneFiles(ricmFiles);
+                resultFluorFiles = cloneFiles(fluorFiles);
+                break;
+        }
+
         result = new Result(
                 inputModeBox.getSelectedIndex(),
                 ((Number) segChannelSpinner.getValue()).intValue(),
                 ((Number) firstMeasChannelSpinner.getValue()).intValue(),
-                ricmContainerFile,
-                fluorContainerFile,
-                cloneFiles(ricmFiles),
-                cloneFiles(fluorFiles),
+                resultRicmContainer,
+                resultFluorContainer,
+                resultRicmFiles,
+                resultFluorFiles,
                 cloneFiles(combinedFiles),
                 ((Number) minAreaSpinner.getValue()).intValue(),
                 (String) thresholdMethodBox.getSelectedItem(),
@@ -385,14 +424,32 @@ public final class BatchSegmentationDialog extends JDialog {
     private boolean hasRequiredInputs() {
         switch (inputModeBox.getSelectedIndex()) {
             case 0:
-                return ricmContainerFile != null && fluorContainerFile != null;
+                return ricmOnlyFiles != null && ricmOnlyFiles.length > 0;
             case 1:
-                return ricmFiles != null && ricmFiles.length > 0 && fluorFiles != null && fluorFiles.length > 0;
+                return ricmOnlyContainerFile != null;
             case 2:
+                return ricmContainerFile != null && fluorContainerFile != null;
+            case 3:
+                return ricmFiles != null && ricmFiles.length > 0 && fluorFiles != null && fluorFiles.length > 0;
+            case 4:
                 return combinedFiles != null && combinedFiles.length > 0;
             default:
                 return false;
         }
+    }
+
+    private JPanel buildRicmFileListPanel() {
+        final JPanel panel = new JPanel(new BorderLayout(8, 8));
+        panel.setBorder(BorderFactory.createTitledBorder("RICM files"));
+        panel.add(createFileChooserRow("RICM files", ricmOnlyFilesList, true, SelectionTarget.RICM_ONLY_FILES), BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel buildRicmContainerPanel() {
+        final JPanel panel = new JPanel(new BorderLayout(8, 8));
+        panel.setBorder(BorderFactory.createTitledBorder("RICM container"));
+        panel.add(createFileChooserRow("RICM container", ricmOnlyContainerList, false, SelectionTarget.RICM_ONLY_CONTAINER), BorderLayout.CENTER);
+        return panel;
     }
 
     private JPanel buildMode1Panel() {
@@ -455,6 +512,12 @@ public final class BatchSegmentationDialog extends JDialog {
         }
 
         switch (target) {
+            case RICM_ONLY_CONTAINER:
+                ricmOnlyContainerFile = chooser.getSelectedFile();
+                break;
+            case RICM_ONLY_FILES:
+                ricmOnlyFiles = cloneFiles(chooser.getSelectedFiles());
+                break;
             case RICM_CONTAINER:
                 ricmContainerFile = chooser.getSelectedFile();
                 break;
@@ -479,6 +542,12 @@ public final class BatchSegmentationDialog extends JDialog {
 
     private void clearFiles(SelectionTarget target) {
         switch (target) {
+            case RICM_ONLY_CONTAINER:
+                ricmOnlyContainerFile = null;
+                break;
+            case RICM_ONLY_FILES:
+                ricmOnlyFiles = null;
+                break;
             case RICM_CONTAINER:
                 ricmContainerFile = null;
                 break;
@@ -501,6 +570,8 @@ public final class BatchSegmentationDialog extends JDialog {
     }
 
     private void refreshFileLists() {
+        ricmOnlyContainerList.setListData(fileNames(ricmOnlyContainerFile != null ? new File[] {ricmOnlyContainerFile} : null));
+        ricmOnlyFilesList.setListData(fileNames(ricmOnlyFiles));
         ricmContainerList.setListData(fileNames(ricmContainerFile != null ? new File[] {ricmContainerFile} : null));
         fluorContainerList.setListData(fileNames(fluorContainerFile != null ? new File[] {fluorContainerFile} : null));
         ricmFilesList.setListData(fileNames(ricmFiles));
@@ -511,11 +582,11 @@ public final class BatchSegmentationDialog extends JDialog {
     private void updateInputModeCard() {
         final CardLayout cl = (CardLayout) inputModeCards.getLayout();
         final int modeIndex = inputModeBox.getSelectedIndex();
-        final boolean mode3 = modeIndex == 2;
-        segChannelLabel.setVisible(mode3);
-        segChannelSpinner.setVisible(mode3);
-        firstMeasChannelLabel.setVisible(mode3);
-        firstMeasChannelSpinner.setVisible(mode3);
+        final boolean mode5 = modeIndex == 4;
+        segChannelLabel.setVisible(mode5);
+        segChannelSpinner.setVisible(mode5);
+        firstMeasChannelLabel.setVisible(mode5);
+        firstMeasChannelSpinner.setVisible(mode5);
         switch (modeIndex) {
             case 0:
                 cl.show(inputModeCards, CARD_MODE1);
@@ -525,6 +596,12 @@ public final class BatchSegmentationDialog extends JDialog {
                 break;
             case 2:
                 cl.show(inputModeCards, CARD_MODE3);
+                break;
+            case 3:
+                cl.show(inputModeCards, CARD_MODE4);
+                break;
+            case 4:
+                cl.show(inputModeCards, CARD_MODE5);
                 break;
             default:
                 cl.show(inputModeCards, CARD_MODE1);
@@ -562,6 +639,12 @@ public final class BatchSegmentationDialog extends JDialog {
     private void rememberInputDirectory(JFileChooser chooser, SelectionTarget target) {
         File dir = null;
         switch (target) {
+            case RICM_ONLY_CONTAINER:
+                dir = parentDirectory(ricmOnlyContainerFile);
+                break;
+            case RICM_ONLY_FILES:
+                dir = firstParentDirectory(ricmOnlyFiles);
+                break;
             case RICM_CONTAINER:
                 dir = parentDirectory(ricmContainerFile);
                 break;
@@ -739,6 +822,8 @@ public final class BatchSegmentationDialog extends JDialog {
     }
 
     private enum SelectionTarget {
+        RICM_ONLY_CONTAINER,
+        RICM_ONLY_FILES,
         RICM_CONTAINER,
         FLUOR_CONTAINER,
         RICM_FILES,

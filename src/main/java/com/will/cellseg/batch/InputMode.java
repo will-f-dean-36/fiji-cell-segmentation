@@ -1,6 +1,8 @@
 package com.will.cellseg.batch;
 
 public enum InputMode {
+    RICM_FILE_LIST,
+    RICM_CONTAINER_SERIES,
     CONTAINER_SERIES_PAIR,
     FILE_LIST_PAIR,
     SAME_FILE_CHANNELS;

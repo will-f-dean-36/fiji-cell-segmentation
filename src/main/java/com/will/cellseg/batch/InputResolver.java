@@ -30,6 +30,10 @@ public final class InputResolver {
         // All three UI modes are normalized into the same `PairedUnit` model so the
         // batch runner does not need mode-specific branching later.
         switch (mode) {
+            case RICM_FILE_LIST:
+                return resolveRicmFileList(ricmFiles, allTimepoints);
+            case RICM_CONTAINER_SERIES:
+                return resolveRicmContainerSeries(ricmContainerFile, allTimepoints, metadataProvider);
             case CONTAINER_SERIES_PAIR:
                 return resolveMode1(ricmContainerFile, fluorContainerFile, allTimepoints, metadataProvider);
             case FILE_LIST_PAIR:
@@ -43,6 +47,38 @@ public final class InputResolver {
             default:
                 throw new IllegalArgumentException("Unsupported input mode: " + mode);
         }
+    }
+
+    private static List<PairedUnit> resolveRicmFileList(File[] ricmFiles, boolean allTimepoints) throws Exception {
+        final File[] ricm = cleanFiles(ricmFiles);
+        if (ricm.length == 0) {
+            throw new IllegalArgumentException("Mode 1 requires at least one RICM file.");
+        }
+
+        final List<PairedUnit> out = new ArrayList<PairedUnit>();
+        for (int i = 0; i < ricm.length; i++) {
+            requireFile(ricm[i], "RICM file #" + (i + 1));
+            final SegUnit seg = new SegUnit(ricm[i], 0, 0);
+            final MeasUnit meas = new MeasUnit(ricm[i], 0, new int[] {0}, allTimepoints);
+            out.add(new PairedUnit(seg, meas));
+        }
+        return out;
+    }
+
+    private static List<PairedUnit> resolveRicmContainerSeries(
+            File ricmContainerFile,
+            boolean allTimepoints,
+            MetadataProvider metadataProvider) throws Exception {
+
+        requireFile(ricmContainerFile, "RICM container");
+        final int ricmSeries = metadataProvider.getSeriesCount(ricmContainerFile);
+        final List<PairedUnit> out = new ArrayList<PairedUnit>();
+        for (int s = 0; s < ricmSeries; s++) {
+            final SegUnit seg = new SegUnit(ricmContainerFile, s, 0);
+            final MeasUnit meas = new MeasUnit(ricmContainerFile, s, new int[] {0}, allTimepoints);
+            out.add(new PairedUnit(seg, meas));
+        }
+        return out;
     }
 
     private static List<PairedUnit> resolveMode1(
