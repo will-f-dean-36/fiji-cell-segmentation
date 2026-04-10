@@ -370,7 +370,10 @@ public class CellSegmentationCommand_Batch implements Command {
 
                         // Segmentation always runs before ROI review; ROI review can then
                         // accept, modify, or reject the proposed ROI set.
-                        result = CellSegmentationPipeline.run(segImp, p, pairThresholdConfig);
+                        final ImagePlus preparedWork = thresholdSelection.getPreparedWork();
+                        result = preparedWork != null
+                                ? CellSegmentationPipeline.completeSegmentation(preparedWork, segImp, p, pairThresholdConfig)
+                                : CellSegmentationPipeline.run(segImp, p, pairThresholdConfig);
 
                         final Roi[] proposedRois = result.roiManager != null ? cloneRois(result.roiManager.getRoisAsArray()) : new Roi[0];
                         finalSegmentation = resolveSegmentationResult(
@@ -748,12 +751,12 @@ public class CellSegmentationCommand_Batch implements Command {
             final ThresholdConfig cachedConfig = thresholdConfigCache.get(segKey);
             if (cachedConfig != null) {
                 // Reuse the exact threshold config chosen for this SegUnit earlier.
-                return ThresholdSelection.continueWith(cachedConfig, false, false);
+                return ThresholdSelection.continueWith(cachedConfig, false, false, null);
             }
         }
 
         if (!shouldStop) {
-            return ThresholdSelection.continueWith(currentConfig, false, false);
+            return ThresholdSelection.continueWith(currentConfig, false, false, null);
         }
 
         final ImagePlus preview = CellSegmentationPipeline.prepareThresholdPreview(segImp, EdgeDetector.fromLabel(edgeMethod), true);
@@ -765,6 +768,7 @@ public class CellSegmentationCommand_Batch implements Command {
                     currentConfig,
                     buildThresholdTitle(pairIndex1, totalPairs, seg));
             if (!selected.isContinue()) {
+                closeImage(preview);
                 return ThresholdSelection.from(selected);
             }
             final ThresholdConfig selectedConfig = selected.getConfig();
@@ -774,9 +778,11 @@ public class CellSegmentationCommand_Batch implements Command {
             return ThresholdSelection.continueWith(
                     selectedConfig,
                     selected.shouldRememberThreshold(),
-                    selected.isContinueToEnd());
-        } finally {
+                    selected.isContinueToEnd(),
+                    preview);
+        } catch (RuntimeException e) {
             closeImage(preview);
+            throw e;
         }
     }
 
@@ -934,27 +940,32 @@ public class CellSegmentationCommand_Batch implements Command {
         private final ThresholdConfig config;
         private final boolean rememberThreshold;
         private final boolean continueToEnd;
+        private final ImagePlus preparedWork;
 
         private ThresholdSelection(
                 BatchStopController.RoiReviewAction action,
                 ThresholdConfig config,
                 boolean rememberThreshold,
-                boolean continueToEnd) {
+                boolean continueToEnd,
+                ImagePlus preparedWork) {
             this.action = action;
             this.config = config;
             this.rememberThreshold = rememberThreshold;
             this.continueToEnd = continueToEnd;
+            this.preparedWork = preparedWork;
         }
 
         private static ThresholdSelection continueWith(
                 ThresholdConfig config,
                 boolean rememberThreshold,
-                boolean continueToEnd) {
+                boolean continueToEnd,
+                ImagePlus preparedWork) {
             return new ThresholdSelection(
                     continueToEnd ? BatchStopController.RoiReviewAction.CONTINUE_TO_END : BatchStopController.RoiReviewAction.CONTINUE,
                     config,
                     rememberThreshold,
-                    continueToEnd);
+                    continueToEnd,
+                    preparedWork);
         }
 
         private static ThresholdSelection from(BatchStopController.ThresholdSelectionResult result) {
@@ -962,7 +973,8 @@ public class CellSegmentationCommand_Batch implements Command {
                     result.getAction(),
                     result.getConfig(),
                     result.shouldRememberThreshold(),
-                    result.isContinueToEnd());
+                    result.isContinueToEnd(),
+                    null);
         }
 
         private boolean isSkip() {
@@ -983,6 +995,10 @@ public class CellSegmentationCommand_Batch implements Command {
 
         private boolean shouldRememberThreshold() {
             return rememberThreshold;
+        }
+
+        private ImagePlus getPreparedWork() {
+            return preparedWork;
         }
     }
 

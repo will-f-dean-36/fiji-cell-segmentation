@@ -29,10 +29,6 @@ import org.scijava.Context;
 
 /** Coordinates optional batch stop-points without blocking the Swing EDT. */
 public final class BatchStopController {
-    // ROI Manager is treated as a shared global IJ1 tool window, so we either reuse the
-    // existing one or create one once and keep reusing it for the whole batch run.
-    private RoiManager reviewRoiManager;
-    private boolean reviewRoiManagerOwned;
     private boolean rememberThreshold = true;
 
     public ThresholdSelectionResult maybeSelectThreshold(
@@ -169,10 +165,9 @@ public final class BatchStopController {
             @Override
             public void run() {
                 final ImagePlus reviewImp = imp != null ? imp.duplicate() : null;
-                // ROI edits happen through the standard IJ1 ROI Manager so users can
-                // rely on familiar Fiji tools instead of custom editing controls.
-                final RoiManager roiManager = getVisibleRoiManager();
-                roiManager.reset();
+                // Use a dedicated temporary ROI Manager for each review stop so batch
+                // review stays isolated from any shared/global IJ1 ROI Manager state.
+                final RoiManager roiManager = new RoiManager();
                 for (Roi roi : cloneRois(proposedRois)) {
                     if (roi != null) {
                         roiManager.addRoi(roi);
@@ -196,6 +191,7 @@ public final class BatchStopController {
                             reviewImp.changes = false;
                             reviewImp.close();
                         }
+                        roiManager.close();
                     }
                 };
 
@@ -313,34 +309,8 @@ public final class BatchStopController {
         return panel;
     }
 
-    private RoiManager getVisibleRoiManager() {
-        if (reviewRoiManager == null) {
-            // `getInstance2` returns the existing manager if one is already open and
-            // otherwise avoids creating a second floating window.
-            reviewRoiManager = RoiManager.getInstance2();
-            if (reviewRoiManager == null) {
-                reviewRoiManager = new RoiManager();
-                reviewRoiManagerOwned = true;
-            }
-        }
-        reviewRoiManager.setVisible(true);
-        return reviewRoiManager;
-    }
-
     public void dispose() {
-        // If we created the manager, close it. If the user already had one, leave the
-        // window open but clear the batch ROIs we inserted.
-        if (reviewRoiManager == null) {
-            return;
-        }
-        if (reviewRoiManagerOwned) {
-            reviewRoiManager.reset();
-            reviewRoiManager.close();
-        } else {
-            reviewRoiManager.reset();
-        }
-        reviewRoiManager = null;
-        reviewRoiManagerOwned = false;
+        // Each ROI review uses its own temporary manager and closes it immediately.
     }
 
     private static Roi[] cloneRois(Roi[] rois) {

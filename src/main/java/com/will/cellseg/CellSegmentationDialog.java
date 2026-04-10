@@ -65,11 +65,12 @@ public final class CellSegmentationDialog extends JDialog {
 
     private final JComboBox<String> thresholdMethodBox;
     private final JCheckBox darkObjectsBox;
-    private final JCheckBox pauseThresholdBox;
     private final JComboBox<String> edgeMethodBox;
     private final JSpinner minAreaSpinner;
     private final JCheckBox excludeBorderBox;
 
+    private final JComboBox<String> thresholdReviewBox;
+    private final JComboBox<String> roiReviewBox;
     private final JCheckBox showStepsBox;
     private final JCheckBox showOverlayBox;
     private final JCheckBox showRoiOverlayBox;
@@ -109,11 +110,14 @@ public final class CellSegmentationDialog extends JDialog {
         thresholdMethodBox = new JComboBox<String>(THRESHOLD_METHODS);
         thresholdMethodBox.setSelectedItem(initial.thrMethod);
         darkObjectsBox = new JCheckBox("Dark objects (cells darker than background)", initial.darkObjects);
-        pauseThresholdBox = new JCheckBox("Pause to adjust threshold", initial.pauseThreshold);
         edgeMethodBox = new JComboBox<String>(EDGE_METHODS);
         edgeMethodBox.setSelectedItem(initial.edgeMethod);
         minAreaSpinner = new JSpinner(new SpinnerNumberModel(initial.minArea, 0, Integer.MAX_VALUE, 1));
         excludeBorderBox = new JCheckBox("Exclude cells touching image border", initial.excludeBorderTouching);
+        thresholdReviewBox = new JComboBox<String>(new String[] {"No", "Yes"});
+        thresholdReviewBox.setSelectedItem(initial.thresholdReview ? "Yes" : "No");
+        roiReviewBox = new JComboBox<String>(new String[] {"No", "Yes"});
+        roiReviewBox.setSelectedItem(initial.roiReview ? "Yes" : "No");
 
         showStepsBox = new JCheckBox("Show intermediate images", initial.showSteps);
         showOverlayBox = new JCheckBox("Show label overlay", initial.showLabelOverlay);
@@ -143,6 +147,7 @@ public final class CellSegmentationDialog extends JDialog {
 
         final JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Segmentation", buildSegmentationPanel());
+        tabs.addTab("Review", buildReviewPanel());
         tabs.addTab("Display", buildDisplayPanel());
         tabs.addTab("Measurements", buildMeasurementPanel());
         tabs.addTab("Save", buildSavePanel());
@@ -201,10 +206,18 @@ public final class CellSegmentationDialog extends JDialog {
         int row = 0;
         DialogFormUtils.addRow(panel, row++, new JLabel("Auto-threshold method"), thresholdMethodBox);
         DialogFormUtils.addCheckRow(panel, row++, darkObjectsBox);
-        DialogFormUtils.addCheckRow(panel, row++, pauseThresholdBox);
         DialogFormUtils.addRow(panel, row++, new JLabel("Edge method"), edgeMethodBox);
         DialogFormUtils.addRow(panel, row++, new JLabel("Min cell area (px)"), minAreaSpinner);
         DialogFormUtils.addCheckRow(panel, row++, excludeBorderBox);
+        DialogFormUtils.addVerticalGlue(panel, row);
+        return panel;
+    }
+
+    private JPanel buildReviewPanel() {
+        final JPanel panel = createFormPanel();
+        int row = 0;
+        DialogFormUtils.addRow(panel, row++, new JLabel("Threshold Review"), thresholdReviewBox);
+        DialogFormUtils.addRow(panel, row++, new JLabel("ROI Review"), roiReviewBox);
         DialogFormUtils.addVerticalGlue(panel, row);
         return panel;
     }
@@ -293,9 +306,10 @@ public final class CellSegmentationDialog extends JDialog {
                 ((Number) minAreaSpinner.getValue()).intValue(),
                 (String) thresholdMethodBox.getSelectedItem(),
                 darkObjectsBox.isSelected(),
-                pauseThresholdBox.isSelected(),
+                "Yes".equals(thresholdReviewBox.getSelectedItem()),
                 (String) edgeMethodBox.getSelectedItem(),
                 excludeBorderBox.isSelected(),
+                "Yes".equals(roiReviewBox.getSelectedItem()),
                 showStepsBox.isSelected(),
                 showRoiOverlayBox.isSelected(),
                 showOverlayBox.isSelected(),
@@ -329,9 +343,10 @@ public final class CellSegmentationDialog extends JDialog {
         final int minArea;
         final String thrMethod;
         final boolean darkObjects;
-        final boolean pauseThreshold;
+        final boolean thresholdReview;
         final String edgeMethod;
         final boolean excludeBorderTouching;
+        final boolean roiReview;
         final boolean showSteps;
         final boolean showRoiOverlay;
         final boolean showLabelOverlay;
@@ -359,9 +374,10 @@ public final class CellSegmentationDialog extends JDialog {
                 int minArea,
                 String thrMethod,
                 boolean darkObjects,
-                boolean pauseThreshold,
+                boolean thresholdReview,
                 String edgeMethod,
                 boolean excludeBorderTouching,
+                boolean roiReview,
                 boolean showSteps,
                 boolean showRoiOverlay,
                 boolean showLabelOverlay,
@@ -387,9 +403,10 @@ public final class CellSegmentationDialog extends JDialog {
             this.minArea = minArea;
             this.thrMethod = thrMethod;
             this.darkObjects = darkObjects;
-            this.pauseThreshold = pauseThreshold;
+            this.thresholdReview = thresholdReview;
             this.edgeMethod = edgeMethod;
             this.excludeBorderTouching = excludeBorderTouching;
+            this.roiReview = roiReview;
             this.showSteps = showSteps;
             this.showRoiOverlay = showRoiOverlay;
             this.showLabelOverlay = showLabelOverlay;

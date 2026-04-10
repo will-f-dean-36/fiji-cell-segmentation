@@ -193,7 +193,7 @@ public final class BatchSegmentationDialog extends JDialog {
         final JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Inputs", buildInputsPanel());
         tabs.addTab("Segmentation", buildSegmentationPanel());
-        tabs.addTab("Batch", buildBatchPanel());
+        tabs.addTab("Review", buildBatchPanel());
         tabs.addTab("Measurements", buildMeasurementPanel());
         tabs.addTab("Save", buildSavePanel());
         add(tabs, BorderLayout.CENTER);

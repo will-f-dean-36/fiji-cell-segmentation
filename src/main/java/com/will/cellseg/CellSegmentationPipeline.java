@@ -110,12 +110,18 @@ public final class CellSegmentationPipeline {
     public static ImagePlus prepareThresholdPreview(ImagePlus imp, EdgeDetector edgeDetector, boolean show) {
         // Batch mode uses this to stop after edge detection but before thresholding.
         // That mirrors the same logical stop-point used in the interactive pipeline.
-        ImagePlus work = duplicateForProcessing(imp, show);
+        ImagePlus work = duplicateForProcessing(imp);
         applyEdgeDetector(work, edgeDetector);
         normalizeToUnitRange(work);
         // Gradient images often start with stale display limits inherited from the
         // source image, so reset them to the actual gradient dynamic range.
         autoAdjustDisplayRange(work);
+        if (show) {
+            work.show();
+            if (work.getWindow() != null) {
+                WindowManager.setCurrentWindow(work.getWindow());
+            }
+        }
         return work;
     }
 
@@ -269,19 +275,14 @@ public final class CellSegmentationPipeline {
         if (imp.getWindow() != null) {
             WindowManager.setCurrentWindow(imp.getWindow());
         }
-        roiManager.runCommand(imp, "Show All");
+        roiManager.runCommand(imp, "Show All with labels");
         imp.updateAndDraw();
     }
 
-    private static ImagePlus duplicateForProcessing(ImagePlus imp, boolean show) {
+    private static ImagePlus duplicateForProcessing(ImagePlus imp) {
         ImagePlus work = new Duplicator().run(imp);
         final String sourceTitle = imp != null && imp.getTitle() != null ? imp.getTitle() : "Image";
         work.setTitle(sourceTitle + " - Threshold Preview");
-
-        if (show) {
-            work.show();
-            if (work.getWindow() != null) WindowManager.setCurrentWindow(work.getWindow());
-        }
         return work;
     }
 
@@ -532,6 +533,9 @@ public final class CellSegmentationPipeline {
         ResultsTable dummyRt = new ResultsTable();
         // minArea auto-widens int -> double; no cast needed
         ParticleAnalyzer pa = new ParticleAnalyzer(paOptions, 0, dummyRt, minArea, Double.POSITIVE_INFINITY);
+        if (binaryMask != null && binaryMask.getWindow() != null) {
+            WindowManager.setCurrentWindow(binaryMask.getWindow());
+        }
         pa.analyze(binaryMask);
 
         if (excludeBorderTouching) {
