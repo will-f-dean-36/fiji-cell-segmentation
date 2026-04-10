@@ -29,6 +29,8 @@ public class CellSegmentationCommand implements Command {
     private boolean thresholdReview = true;
     private boolean roiReview = false;
     private boolean showSteps = false;
+    private boolean showMask = false;
+    private boolean showLabels = false;
     private boolean showLabelOverlay = false;
     private boolean showRoiOverlay = true;
     private String labelsLut = "Rainbow RGB";
@@ -41,6 +43,7 @@ public class CellSegmentationCommand implements Command {
     private boolean saveLabelOverlayToFile = false;
     private boolean saveRois = true;
     private boolean saveMeasurements = true;
+    private boolean saveParameters = true;
     private String edgeMethod = "Sobel (Gradient)";
 
     private boolean measureArea = true;
@@ -79,6 +82,8 @@ public class CellSegmentationCommand implements Command {
                         excludeBorderTouching,
                         roiReview,
                         showSteps,
+                        showMask,
+                        showLabels,
                         showRoiOverlay,
                         showLabelOverlay,
                         labelsLut,
@@ -99,7 +104,8 @@ public class CellSegmentationCommand implements Command {
                         saveLabels,
                         saveLabelOverlayToFile,
                         saveRois,
-                        saveMeasurements));
+                        saveMeasurements,
+                        saveParameters));
         if (options == null) {
             return;
         }
@@ -151,9 +157,9 @@ public class CellSegmentationCommand implements Command {
             return;
         }
 
-        if (sliceResult.mask != null) sliceResult.mask.show();
-        if (sliceResult.labels != null) sliceResult.labels.show();
-        if (sliceResult.labelOverlay != null) sliceResult.labelOverlay.show();
+        if (showMask && sliceResult.mask != null) sliceResult.mask.show();
+        if (showLabels && sliceResult.labels != null) sliceResult.labels.show();
+        if (showLabelOverlay && sliceResult.labelOverlay != null) sliceResult.labelOverlay.show();
         if (sliceResult.resultsTable != null) sliceResult.resultsTable.show("Results");
         if (showRoiOverlay) {
             final List<Roi> rois = new ArrayList<Roi>();
@@ -182,6 +188,7 @@ public class CellSegmentationCommand implements Command {
         final int stackSize = imp.getStackSize();
         final List<Roi> allRois = new ArrayList<Roi>();
         final ResultsTable combinedResults = new ResultsTable();
+        final ResultsTable combinedParameters = new ResultsTable();
         final ij.ImageStack maskStack = new ij.ImageStack(imp.getWidth(), imp.getHeight());
         final ij.ImageStack labelsStack = new ij.ImageStack(imp.getWidth(), imp.getHeight());
         final ij.ImageStack overlayStack = showLabelOverlay || saveLabelOverlayToFile
@@ -234,6 +241,9 @@ public class CellSegmentationCommand implements Command {
             if (sliceResult.resultsTable != null) {
                 appendResults(combinedResults, sliceResult.resultsTable, sliceIndex);
             }
+            if (sliceResult.parameterTable != null) {
+                appendParameterRows(combinedParameters, sliceResult.parameterTable);
+            }
 
             for (Roi roi : sliceResult.rois) {
                 if (roi != null) {
@@ -257,11 +267,17 @@ public class CellSegmentationCommand implements Command {
         final String baseName = CellSegmentationIO.stripExtension(imp.getTitle());
         final ImagePlus maskOut = new ImagePlus(baseName + " - Cell Mask", maskStack);
         final ImagePlus labelsOut = new ImagePlus(baseName + " - Labels", labelsStack);
-        maskOut.show();
-        labelsOut.show();
+        if (showMask) {
+            maskOut.show();
+        }
+        if (showLabels) {
+            labelsOut.show();
+        }
         if (overlayStack != null) {
             final ImagePlus overlayOut = new ImagePlus(baseName + " - LabelsOverlay", overlayStack);
-            overlayOut.show();
+            if (showLabelOverlay) {
+                overlayOut.show();
+            }
             if (autoSave && saveLabelOverlayToFile) {
                 saveImage(overlayOut, new File(outputDir, baseName + "_overlay.tif"));
             }
@@ -274,7 +290,14 @@ public class CellSegmentationCommand implements Command {
             applyRoisToSourceStack(allRois);
         }
         if (autoSave) {
-            saveStackOutputs(baseName, maskOut, labelsOut, allRois, combinedResults, overlayStack != null ? new ImagePlus(baseName + " - LabelsOverlay", overlayStack) : null);
+            saveStackOutputs(
+                    baseName,
+                    maskOut,
+                    labelsOut,
+                    allRois,
+                    combinedResults,
+                    combinedParameters,
+                    overlayStack != null ? new ImagePlus(baseName + " - LabelsOverlay", overlayStack) : null);
         }
 
         IJ.log("[CellSegmentation] Done: processed " + stackSize + " slices");
@@ -389,9 +412,15 @@ public class CellSegmentationCommand implements Command {
                 }
                 final ResultsTable measured = measureRoisOnImage(finalRois, sliceImp, measurements);
                 annotateSliceColumn(measured, sliceIndex);
+                final ResultsTable parameterTable = buildParameterTable(
+                        imp,
+                        sliceIndex,
+                        1,
+                        thresholdConfig,
+                        finalRois.length);
 
                 closeSliceRunResult(runResult);
-                return new SliceProcessingResult(mask, labels, labelOverlay, finalRois, measured, false, false);
+                return new SliceProcessingResult(mask, labels, labelOverlay, finalRois, measured, parameterTable, false, false);
             } finally {
                 if (preparedWork != null && preparedWork.getWindow() != null) {
                     closeImage(preparedWork);
@@ -426,6 +455,9 @@ public class CellSegmentationCommand implements Command {
             if (saveMeasurements && result.resultsTable != null) {
                 CellSegmentationIO.saveResultsTable(result.resultsTable, new File(outputDir, baseName + "_measurements.csv"));
             }
+            if (saveParameters && result.parameterTable != null) {
+                CellSegmentationIO.saveResultsTable(result.parameterTable, new File(outputDir, baseName + "_segmentation_parameters.csv"));
+            }
         } catch (Exception e) {
             IJ.handleException(e);
             IJ.error("Failed to save outputs", e.getMessage());
@@ -438,6 +470,7 @@ public class CellSegmentationCommand implements Command {
             ImagePlus labelsOut,
             List<Roi> allRois,
             ResultsTable combinedResults,
+            ResultsTable combinedParameters,
             ImagePlus overlayOut) {
         if (!ensureOutputDirectory()) {
             closeImage(overlayOut);
@@ -458,6 +491,9 @@ public class CellSegmentationCommand implements Command {
             }
             if (saveMeasurements && combinedResults != null) {
                 CellSegmentationIO.saveResultsTable(combinedResults, new File(outputDir, baseName + "_measurements.csv"));
+            }
+            if (saveParameters && combinedParameters != null) {
+                CellSegmentationIO.saveResultsTable(combinedParameters, new File(outputDir, baseName + "_segmentation_parameters.csv"));
             }
         } catch (Exception e) {
             IJ.handleException(e);
@@ -543,6 +579,62 @@ public class CellSegmentationCommand implements Command {
         }
     }
 
+    private static void appendParameterRows(ResultsTable combined, ResultsTable sliceTable) {
+        if (combined == null || sliceTable == null) {
+            return;
+        }
+        final String[] headings = sliceTable.getHeadings();
+        for (int row = 0; row < sliceTable.getCounter(); row++) {
+            combined.incrementCounter();
+            final int targetRow = combined.getCounter() - 1;
+            if (headings == null) {
+                continue;
+            }
+            for (String heading : headings) {
+                if (heading == null || heading.trim().isEmpty()) {
+                    continue;
+                }
+                final String stringValue = sliceTable.getStringValue(heading, row);
+                if (stringValue != null && stringValue.length() > 0) {
+                    combined.setValue(heading, targetRow, stringValue);
+                    continue;
+                }
+                final double value = sliceTable.getValue(heading, row);
+                if (!Double.isNaN(value)) {
+                    combined.setValue(heading, targetRow, value);
+                }
+            }
+        }
+    }
+
+    private ResultsTable buildParameterTable(
+            ImagePlus source,
+            int sliceIndex,
+            int segChannelIndex1Based,
+            ThresholdConfig thresholdConfig,
+            int acceptedRoiCount) {
+        final ResultsTable table = new ResultsTable();
+        table.incrementCounter();
+        final int row = table.getCounter() - 1;
+        final ThresholdConfig cfg = thresholdConfig != null ? thresholdConfig : ThresholdConfig.auto(thrMethod, darkObjects);
+        final String sourceName = source != null ? source.getTitle() : "image";
+        table.setValue("source_path", row, sourceName);
+        table.setValue("source_file", row, sourceName);
+        table.setValue("series_index_1based", row, sliceIndex);
+        table.setValue("seg_channel_index_1based", row, segChannelIndex1Based);
+        table.setValue("threshold_mode", row, cfg.isManual() ? "manual" : "auto");
+        table.setValue("threshold_method", row, cfg.getMethod());
+        table.setValue("dark_objects", row, cfg.isDarkObjects() ? 1 : 0);
+        table.setValue("threshold_min", row, cfg.isManual() ? cfg.getMinThreshold() : Double.NaN);
+        table.setValue("threshold_max", row, cfg.isManual() ? cfg.getMaxThreshold() : Double.NaN);
+        table.setValue("edge_method", row, edgeMethod);
+        table.setValue("min_area_px", row, minArea);
+        table.setValue("exclude_border_touching", row, excludeBorderTouching ? 1 : 0);
+        table.setValue("roi_review_action", row, roiReview ? "CONTINUE" : "");
+        table.setValue("accepted_roi_count", row, acceptedRoiCount);
+        return table;
+    }
+
     private static ResultsTable measureRoisOnImage(Roi[] rois, ImagePlus image, int measurements) {
         final ResultsTable rt = new ResultsTable();
         if (image == null) {
@@ -598,6 +690,8 @@ public class CellSegmentationCommand implements Command {
         excludeBorderTouching = options.excludeBorderTouching;
         roiReview = options.roiReview;
         showSteps = options.showSteps;
+        showMask = options.showMask;
+        showLabels = options.showLabels;
         showLabelOverlay = options.showLabelOverlay;
         showRoiOverlay = options.showRoiOverlay;
         labelsLut = options.labelsLut;
@@ -619,6 +713,7 @@ public class CellSegmentationCommand implements Command {
         saveLabelOverlayToFile = options.saveLabelOverlayToFile;
         saveRois = options.saveRois;
         saveMeasurements = options.saveMeasurements;
+        saveParameters = options.saveParameters;
     }
 
     private int buildMeasurementFlagsOrDefault() {
@@ -660,6 +755,7 @@ public class CellSegmentationCommand implements Command {
         private final ImagePlus labelOverlay;
         private final Roi[] rois;
         private final ResultsTable resultsTable;
+        private final ResultsTable parameterTable;
         private final boolean aborted;
         private final boolean skipped;
 
@@ -669,6 +765,7 @@ public class CellSegmentationCommand implements Command {
                 ImagePlus labelOverlay,
                 Roi[] rois,
                 ResultsTable resultsTable,
+                ResultsTable parameterTable,
                 boolean aborted,
                 boolean skipped) {
             this.mask = mask;
@@ -676,16 +773,17 @@ public class CellSegmentationCommand implements Command {
             this.labelOverlay = labelOverlay;
             this.rois = rois != null ? rois : new Roi[0];
             this.resultsTable = resultsTable;
+            this.parameterTable = parameterTable;
             this.aborted = aborted;
             this.skipped = skipped;
         }
 
         private static SliceProcessingResult abort() {
-            return new SliceProcessingResult(null, null, null, null, null, true, false);
+            return new SliceProcessingResult(null, null, null, null, null, null, true, false);
         }
 
         private static SliceProcessingResult skip() {
-            return new SliceProcessingResult(null, null, null, null, null, false, true);
+            return new SliceProcessingResult(null, null, null, null, null, null, false, true);
         }
     }
 

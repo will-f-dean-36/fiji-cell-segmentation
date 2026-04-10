@@ -26,6 +26,8 @@ import javax.swing.WindowConstants;
 
 /** Custom single-image settings dialog. */
 public final class CellSegmentationDialog extends JDialog {
+    private static final String[] YES_NO = {"No", "Yes"};
+    private static final String[] OBJECT_POLARITY = {"Dark", "Light"};
     private static final String[] THRESHOLD_METHODS = {
             "Default",
             "Huang",
@@ -64,14 +66,16 @@ public final class CellSegmentationDialog extends JDialog {
     private Result result;
 
     private final JComboBox<String> thresholdMethodBox;
-    private final JCheckBox darkObjectsBox;
+    private final JComboBox<String> objectPolarityBox;
     private final JComboBox<String> edgeMethodBox;
     private final JSpinner minAreaSpinner;
-    private final JCheckBox excludeBorderBox;
+    private final JComboBox<String> excludeBorderBox;
 
     private final JComboBox<String> thresholdReviewBox;
     private final JComboBox<String> roiReviewBox;
     private final JCheckBox showStepsBox;
+    private final JCheckBox showMaskBox;
+    private final JCheckBox showLabelsBox;
     private final JCheckBox showOverlayBox;
     private final JCheckBox showRoiOverlayBox;
     private final JComboBox<String> labelsLutBox;
@@ -95,6 +99,7 @@ public final class CellSegmentationDialog extends JDialog {
     private final JCheckBox saveOverlayBox;
     private final JCheckBox saveRoisBox;
     private final JCheckBox saveMeasurementsBox;
+    private final JCheckBox saveParametersBox;
 
     private CellSegmentationDialog(Frame owner, ImagePlus imp, Result initial) {
         super(owner, "Cell Segmentation", true);
@@ -109,17 +114,21 @@ public final class CellSegmentationDialog extends JDialog {
 
         thresholdMethodBox = new JComboBox<String>(THRESHOLD_METHODS);
         thresholdMethodBox.setSelectedItem(initial.thrMethod);
-        darkObjectsBox = new JCheckBox("Dark objects (cells darker than background)", initial.darkObjects);
+        objectPolarityBox = new JComboBox<String>(OBJECT_POLARITY);
+        objectPolarityBox.setSelectedItem(initial.darkObjects ? "Dark" : "Light");
         edgeMethodBox = new JComboBox<String>(EDGE_METHODS);
         edgeMethodBox.setSelectedItem(initial.edgeMethod);
         minAreaSpinner = new JSpinner(new SpinnerNumberModel(initial.minArea, 0, Integer.MAX_VALUE, 1));
-        excludeBorderBox = new JCheckBox("Exclude cells touching image border", initial.excludeBorderTouching);
-        thresholdReviewBox = new JComboBox<String>(new String[] {"No", "Yes"});
+        excludeBorderBox = new JComboBox<String>(YES_NO);
+        excludeBorderBox.setSelectedItem(initial.excludeBorderTouching ? "Yes" : "No");
+        thresholdReviewBox = new JComboBox<String>(YES_NO);
         thresholdReviewBox.setSelectedItem(initial.thresholdReview ? "Yes" : "No");
-        roiReviewBox = new JComboBox<String>(new String[] {"No", "Yes"});
+        roiReviewBox = new JComboBox<String>(YES_NO);
         roiReviewBox.setSelectedItem(initial.roiReview ? "Yes" : "No");
 
         showStepsBox = new JCheckBox("Show intermediate images", initial.showSteps);
+        showMaskBox = new JCheckBox("Show mask image", initial.showMask);
+        showLabelsBox = new JCheckBox("Show labels image", initial.showLabels);
         showOverlayBox = new JCheckBox("Show label overlay", initial.showLabelOverlay);
         showRoiOverlayBox = new JCheckBox("Show ROI overlay on source image", initial.showRoiOverlay);
         labelsLutBox = new JComboBox<String>(LABEL_LUTS);
@@ -144,6 +153,7 @@ public final class CellSegmentationDialog extends JDialog {
         saveOverlayBox = new JCheckBox("Save label overlay", initial.saveLabelOverlayToFile);
         saveRoisBox = new JCheckBox("Save ROIs (ZIP)", initial.saveRois);
         saveMeasurementsBox = new JCheckBox("Save measurements (CSV)", initial.saveMeasurements);
+        saveParametersBox = new JCheckBox("Save segmentation parameters (CSV)", initial.saveParameters);
 
         final JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Segmentation", buildSegmentationPanel());
@@ -206,10 +216,10 @@ public final class CellSegmentationDialog extends JDialog {
         final JPanel panel = createFormPanel();
         int row = 0;
         DialogFormUtils.addRow(panel, row++, new JLabel("Auto-threshold method"), thresholdMethodBox);
-        DialogFormUtils.addCheckRow(panel, row++, darkObjectsBox);
+        DialogFormUtils.addRow(panel, row++, new JLabel("Object polarity"), objectPolarityBox);
         DialogFormUtils.addRow(panel, row++, new JLabel("Edge method"), edgeMethodBox);
         DialogFormUtils.addRow(panel, row++, new JLabel("Min cell area (px)"), minAreaSpinner);
-        DialogFormUtils.addCheckRow(panel, row++, excludeBorderBox);
+        DialogFormUtils.addRow(panel, row++, new JLabel("Exclude border-touching cells"), excludeBorderBox);
         DialogFormUtils.addVerticalGlue(panel, row);
         return panel;
     }
@@ -227,6 +237,8 @@ public final class CellSegmentationDialog extends JDialog {
         final JPanel panel = createFormPanel();
         int row = 0;
         DialogFormUtils.addCheckRow(panel, row++, showStepsBox);
+        DialogFormUtils.addCheckRow(panel, row++, showMaskBox);
+        DialogFormUtils.addCheckRow(panel, row++, showLabelsBox);
         DialogFormUtils.addCheckRow(panel, row++, showRoiOverlayBox);
         DialogFormUtils.addCheckRow(panel, row++, showOverlayBox);
         DialogFormUtils.addRow(panel, row++, new JLabel("Labels LUT"), labelsLutBox);
@@ -269,6 +281,7 @@ public final class CellSegmentationDialog extends JDialog {
         DialogFormUtils.addCheckRow(panel, row++, saveOverlayBox);
         DialogFormUtils.addCheckRow(panel, row++, saveRoisBox);
         DialogFormUtils.addCheckRow(panel, row++, saveMeasurementsBox);
+        DialogFormUtils.addCheckRow(panel, row++, saveParametersBox);
         DialogFormUtils.addVerticalGlue(panel, row);
         return panel;
     }
@@ -294,6 +307,7 @@ public final class CellSegmentationDialog extends JDialog {
         saveOverlayBox.setEnabled(enabled);
         saveRoisBox.setEnabled(enabled);
         saveMeasurementsBox.setEnabled(enabled);
+        saveParametersBox.setEnabled(enabled);
     }
 
     private void onRun() {
@@ -306,12 +320,14 @@ public final class CellSegmentationDialog extends JDialog {
         result = new Result(
                 ((Number) minAreaSpinner.getValue()).intValue(),
                 (String) thresholdMethodBox.getSelectedItem(),
-                darkObjectsBox.isSelected(),
+                "Dark".equals(objectPolarityBox.getSelectedItem()),
                 "Yes".equals(thresholdReviewBox.getSelectedItem()),
                 (String) edgeMethodBox.getSelectedItem(),
-                excludeBorderBox.isSelected(),
+                "Yes".equals(excludeBorderBox.getSelectedItem()),
                 "Yes".equals(roiReviewBox.getSelectedItem()),
                 showStepsBox.isSelected(),
+                showMaskBox.isSelected(),
+                showLabelsBox.isSelected(),
                 showRoiOverlayBox.isSelected(),
                 showOverlayBox.isSelected(),
                 (String) labelsLutBox.getSelectedItem(),
@@ -332,7 +348,8 @@ public final class CellSegmentationDialog extends JDialog {
                 saveLabelsBox.isSelected(),
                 saveOverlayBox.isSelected(),
                 saveRoisBox.isSelected(),
-                saveMeasurementsBox.isSelected());
+                saveMeasurementsBox.isSelected(),
+                saveParametersBox.isSelected());
         DialogPreferences.saveSingle(result);
         dispose();
     }
@@ -350,6 +367,8 @@ public final class CellSegmentationDialog extends JDialog {
         final boolean excludeBorderTouching;
         final boolean roiReview;
         final boolean showSteps;
+        final boolean showMask;
+        final boolean showLabels;
         final boolean showRoiOverlay;
         final boolean showLabelOverlay;
         final String labelsLut;
@@ -371,6 +390,7 @@ public final class CellSegmentationDialog extends JDialog {
         final boolean saveLabelOverlayToFile;
         final boolean saveRois;
         final boolean saveMeasurements;
+        final boolean saveParameters;
 
         Result(
                 int minArea,
@@ -381,6 +401,8 @@ public final class CellSegmentationDialog extends JDialog {
                 boolean excludeBorderTouching,
                 boolean roiReview,
                 boolean showSteps,
+                boolean showMask,
+                boolean showLabels,
                 boolean showRoiOverlay,
                 boolean showLabelOverlay,
                 String labelsLut,
@@ -401,7 +423,8 @@ public final class CellSegmentationDialog extends JDialog {
                 boolean saveLabels,
                 boolean saveLabelOverlayToFile,
                 boolean saveRois,
-                boolean saveMeasurements) {
+                boolean saveMeasurements,
+                boolean saveParameters) {
             this.minArea = minArea;
             this.thrMethod = thrMethod;
             this.darkObjects = darkObjects;
@@ -410,6 +433,8 @@ public final class CellSegmentationDialog extends JDialog {
             this.excludeBorderTouching = excludeBorderTouching;
             this.roiReview = roiReview;
             this.showSteps = showSteps;
+            this.showMask = showMask;
+            this.showLabels = showLabels;
             this.showRoiOverlay = showRoiOverlay;
             this.showLabelOverlay = showLabelOverlay;
             this.labelsLut = labelsLut;
@@ -431,6 +456,7 @@ public final class CellSegmentationDialog extends JDialog {
             this.saveLabelOverlayToFile = saveLabelOverlayToFile;
             this.saveRois = saveRois;
             this.saveMeasurements = saveMeasurements;
+            this.saveParameters = saveParameters;
         }
     }
 }

@@ -40,6 +40,7 @@ public final class BatchSegmentationDialog extends JDialog {
             "Mode 5: Same-file channels (C1=RICM, C2..=Fluor)"
     };
     private static final String[] YES_NO = {"No", "Yes"};
+    private static final String[] OBJECT_POLARITY = {"Dark", "Light"};
     private static final String[] THRESHOLD_METHODS = {
             "Default",
             "Huang",
@@ -103,10 +104,10 @@ public final class BatchSegmentationDialog extends JDialog {
     private File[] combinedFiles;
 
     private final JComboBox<String> thresholdMethodBox;
-    private final JCheckBox darkObjectsBox;
+    private final JComboBox<String> objectPolarityBox;
     private final JComboBox<String> edgeMethodBox;
     private final JSpinner minAreaSpinner;
-    private final JCheckBox excludeBorderBox;
+    private final JComboBox<String> excludeBorderBox;
 
     private final JComboBox<String> thresholdReviewBox;
     private final JComboBox<String> roiReviewBox;
@@ -172,11 +173,13 @@ public final class BatchSegmentationDialog extends JDialog {
 
         thresholdMethodBox = new JComboBox<String>(THRESHOLD_METHODS);
         thresholdMethodBox.setSelectedItem(initial.thrMethod);
-        darkObjectsBox = new JCheckBox("Dark objects (cells darker than background)", initial.darkObjects);
+        objectPolarityBox = new JComboBox<String>(OBJECT_POLARITY);
+        objectPolarityBox.setSelectedItem(initial.darkObjects ? "Dark" : "Light");
         edgeMethodBox = new JComboBox<String>(EDGE_METHODS);
         edgeMethodBox.setSelectedItem(initial.edgeMethod);
         minAreaSpinner = new JSpinner(new SpinnerNumberModel(initial.minArea, 0, Integer.MAX_VALUE, 1));
-        excludeBorderBox = new JCheckBox("Exclude cells touching image border", initial.excludeBorderTouching);
+        excludeBorderBox = new JComboBox<String>(YES_NO);
+        excludeBorderBox.setSelectedItem(initial.excludeBorderTouching ? "Yes" : "No");
 
         thresholdReviewBox = new JComboBox<String>(YES_NO);
         thresholdReviewBox.setSelectedItem(initial.thresholdStopMode);
@@ -281,10 +284,10 @@ public final class BatchSegmentationDialog extends JDialog {
         final JPanel panel = createFormPanel();
         int row = 0;
         DialogFormUtils.addRow(panel, row++, new JLabel("Auto-threshold method"), thresholdMethodBox);
-        DialogFormUtils.addCheckRow(panel, row++, darkObjectsBox);
+        DialogFormUtils.addRow(panel, row++, new JLabel("Object polarity"), objectPolarityBox);
         DialogFormUtils.addRow(panel, row++, new JLabel("Edge method"), edgeMethodBox);
         DialogFormUtils.addRow(panel, row++, new JLabel("Min cell area (px)"), minAreaSpinner);
-        DialogFormUtils.addCheckRow(panel, row++, excludeBorderBox);
+        DialogFormUtils.addRow(panel, row++, new JLabel("Exclude border-touching cells"), excludeBorderBox);
         DialogFormUtils.addVerticalGlue(panel, row);
         return panel;
     }
@@ -394,9 +397,9 @@ public final class BatchSegmentationDialog extends JDialog {
                 cloneFiles(combinedFiles),
                 ((Number) minAreaSpinner.getValue()).intValue(),
                 (String) thresholdMethodBox.getSelectedItem(),
-                darkObjectsBox.isSelected(),
+                "Dark".equals(objectPolarityBox.getSelectedItem()),
                 (String) edgeMethodBox.getSelectedItem(),
-                excludeBorderBox.isSelected(),
+                "Yes".equals(excludeBorderBox.getSelectedItem()),
                 (String) thresholdReviewBox.getSelectedItem(),
                 (String) roiReviewBox.getSelectedItem(),
                 measureAreaBox.isSelected(),
