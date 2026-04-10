@@ -30,6 +30,7 @@ import org.scijava.Context;
 /** Coordinates optional batch stop-points without blocking the Swing EDT. */
 public final class BatchStopController {
     private boolean rememberThreshold = true;
+    private ImagePlus reviewImage;
 
     public ThresholdSelectionResult maybeSelectThreshold(
             Context ctx,
@@ -51,6 +52,7 @@ public final class BatchStopController {
         SwingUtilities.invokeLater(new Runnable() {
             @Override
             public void run() {
+                hideReviewImage();
                 if (currentOrDefault != null) {
                     currentOrDefault.applyTo(ricmPreview);
                 }
@@ -164,18 +166,15 @@ public final class BatchStopController {
         SwingUtilities.invokeLater(new Runnable() {
             @Override
             public void run() {
-                final ImagePlus reviewImp = imp != null ? imp.duplicate() : null;
-                // Use a dedicated temporary ROI Manager for each review stop so batch
-                // review stays isolated from any shared/global IJ1 ROI Manager state.
-                final RoiManager roiManager = new RoiManager();
+                final RoiManager roiManager = getOrCreateReviewRoiManager();
+                roiManager.reset();
                 for (Roi roi : cloneRois(proposedRois)) {
                     if (roi != null) {
                         roiManager.addRoi(roi);
                     }
                 }
+                final ImagePlus reviewImp = updateReviewImage(imp, title);
                 if (reviewImp != null) {
-                    reviewImp.setTitle(title);
-                    reviewImp.show();
                     roiManager.runCommand(reviewImp, "Show All with labels");
                     if (reviewImp.getWindow() != null) {
                         WindowManager.setCurrentWindow(reviewImp.getWindow());
@@ -190,6 +189,7 @@ public final class BatchStopController {
                             roiManager.runCommand(reviewImp, "Show None");
                             reviewImp.changes = false;
                             reviewImp.close();
+                            reviewImage = null;
                         }
                         roiManager.close();
                     }
@@ -310,7 +310,77 @@ public final class BatchStopController {
     }
 
     public void dispose() {
-        // Each ROI review uses its own temporary manager and closes it immediately.
+        if (reviewImage != null) {
+            reviewImage.changes = false;
+            reviewImage.close();
+            reviewImage = null;
+        }
+    }
+
+    private void hideReviewImage() {
+        if (reviewImage == null || reviewImage.getWindow() == null) {
+            return;
+        }
+        reviewImage.getWindow().setVisible(false);
+    }
+
+    private RoiManager getOrCreateReviewRoiManager() {
+        final RoiManager roiManager = new RoiManager();
+        roiManager.setVisible(true);
+        positionReviewRoiManager(roiManager);
+        return roiManager;
+    }
+
+    private ImagePlus updateReviewImage(ImagePlus source, String title) {
+        if (source == null) {
+            return null;
+        }
+        final ImagePlus updated = source.duplicate();
+        if (reviewImage == null || !isCompatibleReviewImage(reviewImage, updated)) {
+            if (reviewImage != null) {
+                reviewImage.changes = false;
+                reviewImage.close();
+            }
+            reviewImage = updated;
+            reviewImage.setTitle(title);
+            reviewImage.show();
+            return reviewImage;
+        }
+
+        reviewImage.setProcessor(title, updated.getProcessor());
+        reviewImage.setCalibration(updated.getCalibration());
+        reviewImage.setDimensions(updated.getNChannels(), updated.getNSlices(), updated.getNFrames());
+        reviewImage.setOpenAsHyperStack(updated.isHyperStack());
+        reviewImage.updateAndDraw();
+        reviewImage.show();
+        if (reviewImage.getWindow() != null) {
+            reviewImage.getWindow().setVisible(true);
+        }
+        updated.changes = false;
+        updated.close();
+        return reviewImage;
+    }
+
+    private static boolean isCompatibleReviewImage(ImagePlus existing, ImagePlus updated) {
+        return existing.getWidth() == updated.getWidth()
+                && existing.getHeight() == updated.getHeight()
+                && existing.getType() == updated.getType();
+    }
+
+    private static void positionReviewRoiManager(RoiManager roiManager) {
+        if (roiManager == null) {
+            return;
+        }
+        final Rectangle bounds = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        final Dimension size = roiManager.getSize();
+        final int width = Math.max(size.width, 220);
+        final int height = Math.max(size.height, 320);
+        final int centerX = bounds.x + bounds.width / 2;
+        final int centerY = bounds.y + bounds.height / 2;
+        final int gap = 260;
+        final int x = Math.max(bounds.x, centerX - gap - width);
+        final int y = Math.max(bounds.y, centerY - height / 2);
+        roiManager.setLocation(x, y);
     }
 
     private static Roi[] cloneRois(Roi[] rois) {

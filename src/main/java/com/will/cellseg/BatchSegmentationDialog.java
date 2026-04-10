@@ -218,12 +218,13 @@ public final class BatchSegmentationDialog extends JDialog {
     }
 
     static Result showDialog(Result initial) {
+        final Result persistedInitial = DialogPreferences.loadBatch(initial);
         final AtomicReference<Result> out = new AtomicReference<Result>();
         final Runnable task = new Runnable() {
             @Override
             public void run() {
                 final Frame owner = IJ.getInstance();
-                final BatchSegmentationDialog dialog = new BatchSegmentationDialog(owner, initial);
+                final BatchSegmentationDialog dialog = new BatchSegmentationDialog(owner, persistedInitial);
                 dialog.setVisible(true);
                 out.set(dialog.result);
             }
@@ -377,6 +378,7 @@ public final class BatchSegmentationDialog extends JDialog {
                 saveRoisBox.isSelected(),
                 saveMeasurementsBox.isSelected(),
                 saveParametersBox.isSelected());
+        DialogPreferences.saveBatch(result);
         dispose();
     }
 

@@ -175,12 +175,13 @@ public final class CellSegmentationDialog extends JDialog {
     }
 
     static Result showDialog(ImagePlus imp, Result initial) {
+        final Result persistedInitial = DialogPreferences.loadSingle(initial);
         final AtomicReference<Result> out = new AtomicReference<Result>();
         final Runnable task = new Runnable() {
             @Override
             public void run() {
                 final Frame owner = IJ.getInstance();
-                final CellSegmentationDialog dialog = new CellSegmentationDialog(owner, imp, initial);
+                final CellSegmentationDialog dialog = new CellSegmentationDialog(owner, imp, persistedInitial);
                 dialog.setVisible(true);
                 out.set(dialog.result);
             }
@@ -332,6 +333,7 @@ public final class CellSegmentationDialog extends JDialog {
                 saveOverlayBox.isSelected(),
                 saveRoisBox.isSelected(),
                 saveMeasurementsBox.isSelected());
+        DialogPreferences.saveSingle(result);
         dispose();
     }
 
