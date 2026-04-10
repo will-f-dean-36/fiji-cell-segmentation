@@ -12,9 +12,7 @@ import com.will.cellseg.batch.SeriesMetadata;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.Prefs;
-import ij.gui.GenericDialog;
 import ij.gui.Roi;
-import ij.io.FileSaver;
 import ij.measure.ResultsTable;
 import ij.plugin.filter.Analyzer;
 import ij.plugin.frame.RoiManager;
@@ -29,11 +27,45 @@ import org.scijava.Context;
 import org.scijava.command.Command;
 import org.scijava.plugin.Parameter;
 import org.scijava.plugin.Plugin;
-import org.scijava.widget.Button;
 
 @SuppressWarnings({"unused", "FieldMayBeFinal", "CanBeFinal", "FieldCanBeLocal"})
 @Plugin(type = Command.class, name = "Cell Segmentation Batch")
 public class CellSegmentationCommand_Batch implements Command {
+    private static final String[] YES_NO = {"No", "Yes"};
+    private static final String[] THRESHOLD_METHODS = {
+            "Default",
+            "Huang",
+            "Intermodes",
+            "IsoData",
+            "Li",
+            "MaxEntropy",
+            "Mean",
+            "MinError",
+            "Minimum",
+            "Moments",
+            "Otsu",
+            "Percentile",
+            "RenyiEntropy",
+            "Shanbhag",
+            "Triangle",
+            "Yen"
+    };
+    private static final String[] EDGE_METHODS = {
+            "Sobel (Gradient)",
+            "Prewitt",
+            "Scharr",
+            "Laplacian (3x3)",
+            "None"
+    };
+    private static final String[] LABEL_LUTS = {
+            "Rainbow RGB",
+            "16_colors",
+            "Glasbey",
+            "Fire",
+            "Ice",
+            "Grays",
+            "Spectrum"
+    };
 
     // These strings intentionally match the IJ1 wrapper choices exactly, since the
     // wrapper passes them through as hidden SciJava parameters.
@@ -73,89 +105,23 @@ public class CellSegmentationCommand_Batch implements Command {
     @Parameter(visibility = ItemVisibility.INVISIBLE)
     private boolean allTimepoints = true;
 
-    @Parameter(visibility = ItemVisibility.INVISIBLE)
     private String thresholdStopMode = THRESHOLD_STOP_OFF;
 
-    @Parameter(visibility = ItemVisibility.INVISIBLE)
     private String roiReviewMode = ROI_REVIEW_OFF;
 
-    @Parameter(visibility = ItemVisibility.INVISIBLE)
-    private File outputDir;
+    private File outputDir = CellSegmentationIO.getDefaultOutputDirectory();
 
-    @Parameter(label = "Min cell area (px)", min = "0")
     private int minArea = 500;
-
-    @Parameter(
-            label = "Auto-threshold method",
-            choices = {
-                    "Default",
-                    "Huang",
-                    "Intermodes",
-                    "IsoData",
-                    "Li",
-                    "MaxEntropy",
-                    "Mean",
-                    "MinError",
-                    "Minimum",
-                    "Moments",
-                    "Otsu",
-                    "Percentile",
-                    "RenyiEntropy",
-                    "Shanbhag",
-                    "Triangle",
-                    "Yen"
-            }
-    )
     private String thrMethod = "Default";
-
-    @Parameter(label = "Dark objects (cells darker than background)")
     private boolean darkObjects = true;
-
-    @Parameter(
-            label = "Edge method",
-            choices = {
-                    "Sobel (Gradient)",
-                    "Prewitt",
-                    "Scharr",
-                    "Laplacian (3x3)",
-                    "None"
-            }
-    )
     private String edgeMethod = "Sobel (Gradient)";
-
-    @Parameter(
-            label = "Labels LUT",
-            choices = {
-                    "Rainbow RGB",
-                    "16_colors",
-                    "Glasbey",
-                    "Fire",
-                    "Ice",
-                    "Grays",
-                    "Spectrum"
-            }
-    )
     private String labelsLut = "Rainbow RGB";
-
-    @Parameter(label = "Exclude cells touching image border")
     private boolean excludeBorderTouching = false;
 
-    @Parameter(label = "Measurements...", callback = "editMeasurements")
-    private Button editMeasurements;
-
-    @Parameter(label = "Save mask image")
     private boolean saveMask = true;
-
-    @Parameter(label = "Save labels image")
     private boolean saveLabels = true;
-
-    @Parameter(label = "Save label overlay")
     private boolean saveLabelOverlay = false;
-
-    @Parameter(label = "Save ROIs (ZIP)")
     private boolean saveRois = true;
-
-    @Parameter(label = "Save measurements (CSV)")
     private boolean saveMeasurements = true;
 
     private boolean measureArea = true;
@@ -175,6 +141,35 @@ public class CellSegmentationCommand_Batch implements Command {
 
     @Override
     public void run() {
+        final BatchSegmentationDialog.Result options = BatchSegmentationDialog.showDialog(buildInputSummary(), new BatchSegmentationDialog.Result(
+                minArea,
+                thrMethod,
+                darkObjects,
+                edgeMethod,
+                excludeBorderTouching,
+                thresholdStopMode,
+                roiReviewMode,
+                measureArea,
+                measureMean,
+                measureMinMax,
+                measureStdDev,
+                measurePerimeter,
+                measureCentroid,
+                measureRect,
+                measureFeret,
+                measureShape,
+                measureIntDen,
+                outputDir,
+                labelsLut,
+                saveMask,
+                saveLabels,
+                saveLabelOverlay,
+                saveRois,
+                saveMeasurements));
+        if (options == null) {
+            return;
+        }
+        applyOptions(options);
 
         // This command is the real batch engine: validate inputs, load planes, segment
         // the RICM source once per pair, then measure the paired fluorescence planes.
@@ -192,6 +187,7 @@ public class CellSegmentationCommand_Batch implements Command {
                 IJ.error("Could not create output directory: " + outputDir.getAbsolutePath());
                 return;
             }
+            CellSegmentationIO.rememberOutputDirectory(outputDir);
 
             final InputMode mode;
             try {
@@ -259,6 +255,7 @@ public class CellSegmentationCommand_Batch implements Command {
                     minArea,
                     thrMethod,
                     darkObjects,
+                    false,
                     false,
                     false,
                     false,
@@ -553,8 +550,8 @@ public class CellSegmentationCommand_Batch implements Command {
         final SegUnit seg = pair.getSegUnit();
         final MeasUnit meas = pair.getMeasUnit();
 
-        final String segBase = stripExtension(seg.getSource().getName());
-        final String measBase = stripExtension(meas.getSource().getName());
+        final String segBase = CellSegmentationIO.stripExtension(seg.getSource().getName());
+        final String measBase = CellSegmentationIO.stripExtension(meas.getSource().getName());
         final String segSeries = "S" + (seg.getSeriesIndex() + 1);
         final String measSeries = "S" + (meas.getSeriesIndex() + 1);
 
@@ -564,32 +561,52 @@ public class CellSegmentationCommand_Batch implements Command {
         return "pair" + (pairIndex0 + 1) + "_" + segBase + "_" + segSeries + "__" + measBase + "_" + measSeries;
     }
 
-    private void editMeasurements() {
-        GenericDialog gd = new GenericDialog("Measurements");
-        gd.addMessage("Select particle measurements to record:");
-        gd.addCheckbox("Area", measureArea);
-        gd.addCheckbox("Mean", measureMean);
-        gd.addCheckbox("Min/Max", measureMinMax);
-        gd.addCheckbox("Std Dev", measureStdDev);
-        gd.addCheckbox("Perimeter", measurePerimeter);
-        gd.addCheckbox("Centroid", measureCentroid);
-        gd.addCheckbox("Bounding rectangle", measureRect);
-        gd.addCheckbox("Feret's diameter", measureFeret);
-        gd.addCheckbox("Shape descriptors", measureShape);
-        gd.addCheckbox("Integrated density", measureIntDen);
-        gd.showDialog();
-        if (gd.wasCanceled()) return;
+    private String buildInputSummary() {
+        final StringBuilder sb = new StringBuilder();
+        sb.append("Mode: ").append(inputMode != null ? inputMode : "unknown");
+        if (ricmContainerFile != null) {
+            sb.append(" | RICM: ").append(ricmContainerFile.getName());
+        }
+        if (fluorContainerFile != null) {
+            sb.append(" | Fluor: ").append(fluorContainerFile.getName());
+        }
+        if (ricmFiles != null) {
+            sb.append(" | RICM files: ").append(ricmFiles.length);
+        }
+        if (fluorFiles != null) {
+            sb.append(" | Fluor files: ").append(fluorFiles.length);
+        }
+        if (combinedFiles != null) {
+            sb.append(" | Combined files: ").append(combinedFiles.length);
+        }
+        return sb.toString();
+    }
 
-        measureArea = gd.getNextBoolean();
-        measureMean = gd.getNextBoolean();
-        measureMinMax = gd.getNextBoolean();
-        measureStdDev = gd.getNextBoolean();
-        measurePerimeter = gd.getNextBoolean();
-        measureCentroid = gd.getNextBoolean();
-        measureRect = gd.getNextBoolean();
-        measureFeret = gd.getNextBoolean();
-        measureShape = gd.getNextBoolean();
-        measureIntDen = gd.getNextBoolean();
+    private void applyOptions(BatchSegmentationDialog.Result options) {
+        minArea = options.minArea;
+        thrMethod = options.thrMethod;
+        darkObjects = options.darkObjects;
+        edgeMethod = options.edgeMethod;
+        excludeBorderTouching = options.excludeBorderTouching;
+        thresholdStopMode = options.thresholdStopMode;
+        roiReviewMode = options.roiReviewMode;
+        measureArea = options.measureArea;
+        measureMean = options.measureMean;
+        measureMinMax = options.measureMinMax;
+        measureStdDev = options.measureStdDev;
+        measurePerimeter = options.measurePerimeter;
+        measureCentroid = options.measureCentroid;
+        measureRect = options.measureRect;
+        measureFeret = options.measureFeret;
+        measureShape = options.measureShape;
+        measureIntDen = options.measureIntDen;
+        outputDir = options.outputDir;
+        labelsLut = options.labelsLut;
+        saveMask = options.saveMask;
+        saveLabels = options.saveLabels;
+        saveLabelOverlay = options.saveLabelOverlay;
+        saveRois = options.saveRois;
+        saveMeasurements = options.saveMeasurements;
     }
 
     private int buildMeasurementFlags() {
@@ -609,25 +626,11 @@ public class CellSegmentationCommand_Batch implements Command {
 
     private static void saveImage(ImagePlus imp, File out) {
         if (imp == null || out == null) return;
-        FileSaver saver = new FileSaver(imp);
-        saver.saveAsTiff(out.getAbsolutePath());
+        CellSegmentationIO.saveImage(imp, out);
     }
 
     private static void saveRois(Roi[] rois, File out) {
-        if (out == null) return;
-        // Use a temporary hidden manager for ZIP export so we do not disturb the shared
-        // on-screen ROI Manager used during interactive review.
-        final RoiManager roiManager = new RoiManager(false);
-        try {
-            for (Roi roi : cloneRois(rois)) {
-                if (roi != null) {
-                    roiManager.addRoi(roi);
-                }
-            }
-            roiManager.runCommand("Save", out.getAbsolutePath());
-        } finally {
-            roiManager.close();
-        }
+        CellSegmentationIO.saveRois(rois, out);
     }
 
     private static void closeImage(ImagePlus imp) {
@@ -645,13 +648,6 @@ public class CellSegmentationCommand_Batch implements Command {
         }
         imp.changes = false;
         imp.close();
-    }
-
-    private static String stripExtension(String name) {
-        if (name == null) return "image";
-        int dot = name.lastIndexOf('.');
-        if (dot <= 0) return name;
-        return name.substring(0, dot);
     }
 
     private boolean shouldStopForThreshold(String segKey, boolean thresholdStopDisabled) {
@@ -795,7 +791,7 @@ public class CellSegmentationCommand_Batch implements Command {
     }
 
     private static String buildSegmentationBaseName(SegUnit seg) {
-        return stripExtension(seg.getSource().getName())
+        return CellSegmentationIO.stripExtension(seg.getSource().getName())
                 + "_S" + (seg.getSeriesIndex() + 1)
                 + "_C" + (seg.getSegChannelIndex() + 1);
     }

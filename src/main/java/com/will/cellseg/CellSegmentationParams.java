@@ -8,6 +8,7 @@ public final class CellSegmentationParams {
     public final boolean pauseThreshold;
     public final boolean showSteps;
     public final boolean showLabelOverlay;
+    public final boolean showRoiOverlay;
     public final boolean clearRM;
     public final boolean excludeBorderTouching;
     public final EdgeDetector edgeDetector;
@@ -23,6 +24,7 @@ public final class CellSegmentationParams {
             boolean pauseThreshold,
             boolean showSteps,
             boolean showLabelOverlay,
+            boolean showRoiOverlay,
             boolean clearRM,
             boolean excludeBorderTouching,
             EdgeDetector edgeDetector,
@@ -37,6 +39,7 @@ public final class CellSegmentationParams {
         this.pauseThreshold = pauseThreshold;
         this.showSteps = showSteps;
         this.showLabelOverlay = showLabelOverlay;
+        this.showRoiOverlay = showRoiOverlay;
         this.clearRM = clearRM;
         this.excludeBorderTouching = excludeBorderTouching;
         this.edgeDetector = edgeDetector;

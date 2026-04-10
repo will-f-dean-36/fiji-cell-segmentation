@@ -240,6 +240,10 @@ public final class CellSegmentationPipeline {
             IJ.run(labels, "Enhance Contrast", "saturated=0");
         } catch (Throwable ignored) { }
 
+        if (p.showRoiOverlay && imp != null && rm != null) {
+            showRoiOverlayViaManager(imp, rm);
+        }
+
         // 10) Optional overlay merge
         if (p.showLabelOverlay) {
             ImagePlus overlay = createLabelOverlay(imp, labels, p.labelsLut);
@@ -253,6 +257,20 @@ public final class CellSegmentationPipeline {
 
         int roiCount = rm.getCount();
         return new CellSegmentationResult(mask, labels, roiCount, rm, rt);
+    }
+
+    private static void showRoiOverlayViaManager(ImagePlus imp, RoiManager roiManager) {
+        if (imp == null || roiManager == null) {
+            return;
+        }
+        if (imp.getWindow() == null) {
+            imp.show();
+        }
+        if (imp.getWindow() != null) {
+            WindowManager.setCurrentWindow(imp.getWindow());
+        }
+        roiManager.runCommand(imp, "Show All");
+        imp.updateAndDraw();
     }
 
     private static ImagePlus duplicateForProcessing(ImagePlus imp, boolean show) {

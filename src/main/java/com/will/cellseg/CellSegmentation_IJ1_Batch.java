@@ -3,7 +3,6 @@ package com.will.cellseg;
 import com.will.cellseg.batch.InputMode;
 import ij.IJ;
 import ij.gui.GenericDialog;
-import ij.io.DirectoryChooser;
 import ij.plugin.PlugIn;
 import java.awt.FileDialog;
 import java.io.File;
@@ -12,17 +11,6 @@ import org.scijava.Context;
 import org.scijava.command.CommandService;
 
 public class CellSegmentation_IJ1_Batch implements PlugIn {
-
-    private static final String[] THRESHOLD_STOP_LABELS = new String[] {
-            "No",
-            "Yes"
-    };
-
-    private static final String[] ROI_REVIEW_LABELS = new String[] {
-            "No",
-            "Yes"
-    };
-
     private static final String[] MODE_LABELS = new String[] {
             "Mode 1: Two container files (pair by series index)",
             "Mode 2: Two file lists (pair by selection order)",
@@ -43,16 +31,12 @@ public class CellSegmentation_IJ1_Batch implements PlugIn {
         final SelectionPayload selection = chooseFiles(uiOptions.mode);
         if (selection == null) return;
 
-        File outDir = chooseOutputDir();
-        if (outDir == null) return;
-
         IJ.log("[CellSegmentation IJ1 Batch] Input mode: " + uiOptions.mode.name());
-        IJ.log("[CellSegmentation IJ1 Batch] Output directory: " + outDir.getAbsolutePath());
 
         final Context context = IJ1Helper.getLegacyContext();
         final CommandService cs = context.service(CommandService.class);
 
-        cs.run(CellSegmentationCommand_Batch.class, true,
+        cs.run(CellSegmentationCommand_Batch.class, false,
                 "inputMode", uiOptions.mode.name(),
                 "ricmContainerFile", selection.ricmContainerFile,
                 "fluorContainerFile", selection.fluorContainerFile,
@@ -61,10 +45,7 @@ public class CellSegmentation_IJ1_Batch implements PlugIn {
                 "combinedFiles", selection.combinedFiles,
                 "sameFileSegChannelIndex1Based", Integer.valueOf(uiOptions.sameFileSegChannelIndex1Based),
                 "sameFileFirstMeasChannelIndex1Based", Integer.valueOf(uiOptions.sameFileFirstMeasChannelIndex1Based),
-                "thresholdStopMode", uiOptions.thresholdStopMode,
-                "roiReviewMode", uiOptions.roiReviewMode,
-                "allTimepoints", Boolean.TRUE,
-                "outputDir", outDir);
+                "allTimepoints", Boolean.TRUE);
     }
 
     private static BatchUiOptions askInputOptions() {
@@ -74,19 +55,15 @@ public class CellSegmentation_IJ1_Batch implements PlugIn {
         gd.addChoice("Input mode", MODE_LABELS, MODE_LABELS[0]);
         gd.addNumericField("Mode 3 RICM channel", 1, 0);
         gd.addNumericField("Mode 3 first fluorescence channel", 2, 0);
-        gd.addChoice("Threshold Review", THRESHOLD_STOP_LABELS, THRESHOLD_STOP_LABELS[0]);
-        gd.addChoice("ROI Review", ROI_REVIEW_LABELS, ROI_REVIEW_LABELS[0]);
-        gd.addMessage("Batch stop-points are optional. Bio-Formats dialogs are disabled.");
+        gd.addMessage("Review and save options are configured in the main parameter dialog.");
         gd.showDialog();
         if (gd.wasCanceled()) return null;
 
         final int selectedMode = gd.getNextChoiceIndex();
         final int segChannel = Math.max(1, (int) Math.round(gd.getNextNumber()));
         final int firstMeas = Math.max(1, (int) Math.round(gd.getNextNumber()));
-        final String thresholdStopMode = gd.getNextChoice();
-        final String roiReviewMode = gd.getNextChoice();
 
-        return new BatchUiOptions(indexToMode(selectedMode), segChannel, firstMeas, thresholdStopMode, roiReviewMode);
+        return new BatchUiOptions(indexToMode(selectedMode), segChannel, firstMeas);
     }
 
     private static SelectionPayload chooseFiles(InputMode mode) {
@@ -132,13 +109,6 @@ public class CellSegmentation_IJ1_Batch implements PlugIn {
         return files;
     }
 
-    private static File chooseOutputDir() {
-        DirectoryChooser dc = new DirectoryChooser("Select output folder");
-        String dir = dc.getDirectory();
-        if (dir == null || dir.trim().isEmpty()) return null;
-        return new File(dir);
-    }
-
     private static InputMode indexToMode(int idx) {
         switch (idx) {
             case 0:
@@ -156,20 +126,14 @@ public class CellSegmentation_IJ1_Batch implements PlugIn {
         private final InputMode mode;
         private final int sameFileSegChannelIndex1Based;
         private final int sameFileFirstMeasChannelIndex1Based;
-        private final String thresholdStopMode;
-        private final String roiReviewMode;
 
         private BatchUiOptions(
                 InputMode mode,
                 int sameFileSegChannelIndex1Based,
-                int sameFileFirstMeasChannelIndex1Based,
-                String thresholdStopMode,
-                String roiReviewMode) {
+                int sameFileFirstMeasChannelIndex1Based) {
             this.mode = mode;
             this.sameFileSegChannelIndex1Based = sameFileSegChannelIndex1Based;
             this.sameFileFirstMeasChannelIndex1Based = sameFileFirstMeasChannelIndex1Based;
-            this.thresholdStopMode = thresholdStopMode;
-            this.roiReviewMode = roiReviewMode;
         }
     }
 

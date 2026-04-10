@@ -2,93 +2,36 @@ package com.will.cellseg;
 
 import ij.IJ;
 import ij.ImagePlus;
-import ij.gui.GenericDialog;
 import ij.Prefs;
+import java.io.File;
 import org.scijava.command.Command;
 import org.scijava.plugin.Parameter;
 import org.scijava.plugin.Plugin;
-import org.scijava.widget.Button;
 
 @SuppressWarnings({"unused", "FieldMayBeFinal", "CanBeFinal", "FieldCanBeLocal"})
 @Plugin(type = Command.class, name = "Cell Segmentation")
 public class CellSegmentationCommand implements Command {
 
-    // SciJava injects the currently active image when the command is launched from
-    // the IJ1 wrapper (or directly from the ImageJ2 command system).
     @Parameter
     private ImagePlus imp;
 
-    @Parameter(label = "Min cell area (px)", min = "0")
     private int minArea = 500;
-
-    @Parameter(
-            label = "Auto-threshold method",
-            choices = {
-                    "Default",
-                    "Huang",
-                    "Intermodes",
-                    "IsoData",
-                    "Li",
-                    "MaxEntropy",
-                    "Mean",
-                    "MinError",
-                    "Minimum",
-                    "Moments",
-                    "Otsu",
-                    "Percentile",
-                    "RenyiEntropy",
-                    "Shanbhag",
-                    "Triangle",
-                    "Yen"
-            }
-    )
     private String thrMethod = "Default";
-
-    @Parameter(label = "Dark objects (cells darker than background)")
     private boolean darkObjects = true;
-
-    @Parameter(label = "Pause to adjust threshold")
     private boolean pauseThreshold = true;
-
-    @Parameter(label = "Show intermediate images")
     private boolean showSteps = false;
-
-    @Parameter(label = "Show label overlay")
     private boolean showLabelOverlay = false;
-
-    @Parameter(
-            label = "Labels LUT",
-            choices = {
-                    "Rainbow RGB",
-                    "16_colors",
-                    "Glasbey",
-                    "Fire",
-                    "Ice",
-                    "Grays",
-                    "Spectrum"
-            }
-    )
+    private boolean showRoiOverlay = true;
     private String labelsLut = "Rainbow RGB";
-
-    @Parameter(label = "Clear ROI Manager first")
     private boolean clearRM = true;
-
-    @Parameter(label = "Exclude cells touching image border")
     private boolean excludeBorderTouching = false;
-
-    @Parameter(label = "Measurements...", callback = "editMeasurements")
-    private Button editMeasurements;
-
-    @Parameter(
-            label = "Edge method",
-            choices = {
-                    "Sobel (Gradient)",
-                    "Prewitt",
-                    "Scharr",
-                    "Laplacian (3x3)",
-                    "None"
-            }
-    )
+    private boolean autoSave = false;
+    private File outputDir = CellSegmentationIO.getDefaultOutputDirectory();
+    private boolean saveMask = true;
+    private boolean saveLabels = true;
+    private boolean saveLabelOverlayToFile = false;
+    private boolean saveRois = true;
+    private boolean saveMeasurements = true;
     private String edgeMethod = "Sobel (Gradient)";
 
     private boolean measureArea = true;
@@ -109,25 +52,59 @@ public class CellSegmentationCommand implements Command {
             return;
         }
 
-        // Convert UI choice string into a concrete edge detector.
-        EdgeDetector edgeDetector = EdgeDetector.fromLabel(edgeMethod);
+        final CellSegmentationDialog.Result options = CellSegmentationDialog.showDialog(
+                imp,
+                new CellSegmentationDialog.Result(
+                        minArea,
+                        thrMethod,
+                        darkObjects,
+                        pauseThreshold,
+                        edgeMethod,
+                        excludeBorderTouching,
+                        showSteps,
+                        showLabelOverlay,
+                        showRoiOverlay,
+                        labelsLut,
+                        clearRM,
+                        measureArea,
+                        measureMean,
+                        measureMinMax,
+                        measureStdDev,
+                        measurePerimeter,
+                        measureCentroid,
+                        measureRect,
+                        measureFeret,
+                        measureShape,
+                        measureIntDen,
+                        autoSave,
+                        outputDir,
+                        saveMask,
+                        saveLabels,
+                        saveLabelOverlayToFile,
+                        saveRois,
+                        saveMeasurements));
+        if (options == null) {
+            return;
+        }
 
-        // IJ1 measurement flags are a bitmask, so the checkbox UI is collapsed into
-        // one integer that ParticleAnalyzer / Analyzer understand.
+        applyOptions(options);
+
+        final EdgeDetector edgeDetector = EdgeDetector.fromLabel(edgeMethod);
+
         int measurements = buildMeasurementFlags();
         if (measurements == 0) {
             measurements = ij.measure.Measurements.AREA;
             IJ.log("[CellSegmentation] No measurements selected; defaulting to Area.");
         }
 
-        // Bundle UI parameters for a single pipeline run.
-        CellSegmentationParams p = new CellSegmentationParams(
+        final CellSegmentationParams p = new CellSegmentationParams(
                 minArea,
                 thrMethod,
                 darkObjects,
                 pauseThreshold,
                 showSteps,
                 showLabelOverlay,
+                showRoiOverlay,
                 clearRM,
                 excludeBorderTouching,
                 edgeDetector,
@@ -137,60 +114,107 @@ public class CellSegmentationCommand implements Command {
                 true
         );
 
-        // Store global background polarity pref
         final boolean prevBlackBg = Prefs.blackBackground;
         try {
-            // Ensure black defines background
             Prefs.blackBackground = true;
 
-            // The pipeline returns display-ready images plus the ROI/measurement state
-            // accumulated during analysis.
-            CellSegmentationResult r = CellSegmentationPipeline.run(imp, p);
+            final CellSegmentationResult r = CellSegmentationPipeline.run(imp, p);
 
             if (r.mask != null) r.mask.show();
             if (r.labels != null) r.labels.show();
+            if (autoSave) {
+                saveOutputs(r);
+            }
 
             IJ.log("[CellSegmentation] Done: " + r.roiCount + " ROIs");
         } finally {
-            // Restore background color pref
             Prefs.blackBackground = prevBlackBg;
         }
-
-
     }
 
-    private void editMeasurements() {
-        // SciJava buttons call back into regular instance methods, so this opens a
-        // secondary IJ1 dialog without leaving the main command UI.
-        GenericDialog gd = new GenericDialog("Measurements");
-        gd.addMessage("Select particle measurements to record:");
-        gd.addCheckbox("Area", measureArea);
-        gd.addCheckbox("Mean", measureMean);
-        gd.addCheckbox("Min/Max", measureMinMax);
-        gd.addCheckbox("Std Dev", measureStdDev);
-        gd.addCheckbox("Perimeter", measurePerimeter);
-        gd.addCheckbox("Centroid", measureCentroid);
-        gd.addCheckbox("Bounding rectangle", measureRect);
-        gd.addCheckbox("Feret's diameter", measureFeret);
-        gd.addCheckbox("Shape descriptors", measureShape);
-        gd.addCheckbox("Integrated density", measureIntDen);
-        gd.showDialog();
-        if (gd.wasCanceled()) return;
+    private void applyOptions(CellSegmentationDialog.Result options) {
+        minArea = options.minArea;
+        thrMethod = options.thrMethod;
+        darkObjects = options.darkObjects;
+        pauseThreshold = options.pauseThreshold;
+        edgeMethod = options.edgeMethod;
+        excludeBorderTouching = options.excludeBorderTouching;
+        showSteps = options.showSteps;
+        showLabelOverlay = options.showLabelOverlay;
+        showRoiOverlay = options.showRoiOverlay;
+        labelsLut = options.labelsLut;
+        clearRM = options.clearRM;
+        measureArea = options.measureArea;
+        measureMean = options.measureMean;
+        measureMinMax = options.measureMinMax;
+        measureStdDev = options.measureStdDev;
+        measurePerimeter = options.measurePerimeter;
+        measureCentroid = options.measureCentroid;
+        measureRect = options.measureRect;
+        measureFeret = options.measureFeret;
+        measureShape = options.measureShape;
+        measureIntDen = options.measureIntDen;
+        autoSave = options.autoSave;
+        outputDir = options.outputDir;
+        saveMask = options.saveMask;
+        saveLabels = options.saveLabels;
+        saveLabelOverlayToFile = options.saveLabelOverlayToFile;
+        saveRois = options.saveRois;
+        saveMeasurements = options.saveMeasurements;
+    }
 
-        measureArea = gd.getNextBoolean();
-        measureMean = gd.getNextBoolean();
-        measureMinMax = gd.getNextBoolean();
-        measureStdDev = gd.getNextBoolean();
-        measurePerimeter = gd.getNextBoolean();
-        measureCentroid = gd.getNextBoolean();
-        measureRect = gd.getNextBoolean();
-        measureFeret = gd.getNextBoolean();
-        measureShape = gd.getNextBoolean();
-        measureIntDen = gd.getNextBoolean();
+    private void saveOutputs(CellSegmentationResult result) {
+        if (result == null) {
+            return;
+        }
+        if (outputDir == null) {
+            IJ.error("No output directory selected.");
+            return;
+        }
+        if (!CellSegmentationIO.ensureOutputDirectory(outputDir)) {
+            IJ.error("Could not create output directory: " + outputDir.getAbsolutePath());
+            return;
+        }
+
+        CellSegmentationIO.rememberOutputDirectory(outputDir);
+
+        final String baseName = CellSegmentationIO.stripExtension(imp != null ? imp.getTitle() : "image");
+        try {
+            if (saveMask && result.mask != null) {
+                CellSegmentationIO.saveImage(result.mask, new File(outputDir, baseName + "_mask.tif"));
+            }
+            if (saveLabels && result.labels != null) {
+                CellSegmentationIO.saveImage(result.labels, new File(outputDir, baseName + "_labels.tif"));
+            }
+            if (saveLabelOverlayToFile && result.labels != null && imp != null) {
+                final ImagePlus overlay = CellSegmentationPipeline.createLabelOverlay(imp, result.labels, labelsLut);
+                try {
+                    if (overlay != null) {
+                        CellSegmentationIO.saveImage(overlay, new File(outputDir, baseName + "_overlay.tif"));
+                    }
+                } finally {
+                    closeImage(overlay);
+                }
+            }
+            if (saveRois && result.roiManager != null) {
+                CellSegmentationIO.saveRois(result.roiManager.getRoisAsArray(), new File(outputDir, baseName + "_rois.zip"));
+            }
+            if (saveMeasurements && result.resultsTable != null) {
+                CellSegmentationIO.saveResultsTable(result.resultsTable, new File(outputDir, baseName + "_measurements.csv"));
+            }
+        } catch (Exception e) {
+            IJ.handleException(e);
+            IJ.error("Failed to save outputs", e.getMessage());
+        }
+    }
+
+    private static void closeImage(ImagePlus imp) {
+        if (imp == null) return;
+        imp.changes = false;
+        imp.close();
     }
 
     private int buildMeasurementFlags() {
-        // ImageJ encodes measurement options as OR-ed constants.
         int meas = 0;
         if (measureArea) meas |= ij.measure.Measurements.AREA;
         if (measureMean) meas |= ij.measure.Measurements.MEAN;
