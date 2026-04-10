@@ -141,7 +141,15 @@ public class CellSegmentationCommand_Batch implements Command {
 
     @Override
     public void run() {
-        final BatchSegmentationDialog.Result options = BatchSegmentationDialog.showDialog(buildInputSummary(), new BatchSegmentationDialog.Result(
+        final BatchSegmentationDialog.Result options = BatchSegmentationDialog.showDialog(new BatchSegmentationDialog.Result(
+                inputMode != null ? inputModeToIndex(inputMode) : 0,
+                sameFileSegChannelIndex1Based,
+                sameFileFirstMeasChannelIndex1Based,
+                ricmContainerFile,
+                fluorContainerFile,
+                ricmFiles,
+                fluorFiles,
+                combinedFiles,
                 minArea,
                 thrMethod,
                 darkObjects,
@@ -561,28 +569,15 @@ public class CellSegmentationCommand_Batch implements Command {
         return "pair" + (pairIndex0 + 1) + "_" + segBase + "_" + segSeries + "__" + measBase + "_" + measSeries;
     }
 
-    private String buildInputSummary() {
-        final StringBuilder sb = new StringBuilder();
-        sb.append("Mode: ").append(inputMode != null ? inputMode : "unknown");
-        if (ricmContainerFile != null) {
-            sb.append(" | RICM: ").append(ricmContainerFile.getName());
-        }
-        if (fluorContainerFile != null) {
-            sb.append(" | Fluor: ").append(fluorContainerFile.getName());
-        }
-        if (ricmFiles != null) {
-            sb.append(" | RICM files: ").append(ricmFiles.length);
-        }
-        if (fluorFiles != null) {
-            sb.append(" | Fluor files: ").append(fluorFiles.length);
-        }
-        if (combinedFiles != null) {
-            sb.append(" | Combined files: ").append(combinedFiles.length);
-        }
-        return sb.toString();
-    }
-
     private void applyOptions(BatchSegmentationDialog.Result options) {
+        inputMode = indexToInputModeName(options.inputModeIndex);
+        sameFileSegChannelIndex1Based = options.sameFileSegChannelIndex1Based;
+        sameFileFirstMeasChannelIndex1Based = options.sameFileFirstMeasChannelIndex1Based;
+        ricmContainerFile = options.ricmContainerFile;
+        fluorContainerFile = options.fluorContainerFile;
+        ricmFiles = cloneFiles(options.ricmFiles);
+        fluorFiles = cloneFiles(options.fluorFiles);
+        combinedFiles = cloneFiles(options.combinedFiles);
         minArea = options.minArea;
         thrMethod = options.thrMethod;
         darkObjects = options.darkObjects;
@@ -607,6 +602,40 @@ public class CellSegmentationCommand_Batch implements Command {
         saveLabelOverlay = options.saveLabelOverlay;
         saveRois = options.saveRois;
         saveMeasurements = options.saveMeasurements;
+    }
+
+    private static int inputModeToIndex(String modeName) {
+        if (modeName == null) {
+            return 0;
+        }
+        if (InputMode.FILE_LIST_PAIR.name().equalsIgnoreCase(modeName)) {
+            return 1;
+        }
+        if (InputMode.SAME_FILE_CHANNELS.name().equalsIgnoreCase(modeName)) {
+            return 2;
+        }
+        return 0;
+    }
+
+    private static String indexToInputModeName(int index) {
+        switch (index) {
+            case 1:
+                return InputMode.FILE_LIST_PAIR.name();
+            case 2:
+                return InputMode.SAME_FILE_CHANNELS.name();
+            case 0:
+            default:
+                return InputMode.CONTAINER_SERIES_PAIR.name();
+        }
+    }
+
+    private static File[] cloneFiles(File[] files) {
+        if (files == null || files.length == 0) {
+            return null;
+        }
+        final File[] cloned = new File[files.length];
+        System.arraycopy(files, 0, cloned, 0, files.length);
+        return cloned;
     }
 
     private int buildMeasurementFlags() {
