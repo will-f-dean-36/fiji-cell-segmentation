@@ -121,6 +121,7 @@ public final class BatchSegmentationDialog extends JDialog {
     private final JCheckBox saveOverlayBox;
     private final JCheckBox saveRoisBox;
     private final JCheckBox saveMeasurementsBox;
+    private final JCheckBox saveParametersBox;
 
     private BatchSegmentationDialog(Frame owner, Result initial) {
         super(owner, "Batch Cell Segmentation", true);
@@ -187,6 +188,7 @@ public final class BatchSegmentationDialog extends JDialog {
         saveOverlayBox = new JCheckBox("Save label overlay", initial.saveLabelOverlay);
         saveRoisBox = new JCheckBox("Save ROIs (ZIP)", initial.saveRois);
         saveMeasurementsBox = new JCheckBox("Save measurements (CSV)", initial.saveMeasurements);
+        saveParametersBox = new JCheckBox("Save segmentation parameters (CSV)", initial.saveParameters);
 
         final JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Inputs", buildInputsPanel());
@@ -313,6 +315,7 @@ public final class BatchSegmentationDialog extends JDialog {
         DialogFormUtils.addCheckRow(panel, row++, saveOverlayBox);
         DialogFormUtils.addCheckRow(panel, row++, saveRoisBox);
         DialogFormUtils.addCheckRow(panel, row++, saveMeasurementsBox);
+        DialogFormUtils.addCheckRow(panel, row++, saveParametersBox);
         DialogFormUtils.addVerticalGlue(panel, row);
         return panel;
     }
@@ -372,7 +375,8 @@ public final class BatchSegmentationDialog extends JDialog {
                 saveLabelsBox.isSelected(),
                 saveOverlayBox.isSelected(),
                 saveRoisBox.isSelected(),
-                saveMeasurementsBox.isSelected());
+                saveMeasurementsBox.isSelected(),
+                saveParametersBox.isSelected());
         dispose();
     }
 
@@ -660,6 +664,7 @@ public final class BatchSegmentationDialog extends JDialog {
         final boolean saveLabelOverlay;
         final boolean saveRois;
         final boolean saveMeasurements;
+        final boolean saveParameters;
 
         Result(
                 int inputModeIndex,
@@ -693,7 +698,8 @@ public final class BatchSegmentationDialog extends JDialog {
                 boolean saveLabels,
                 boolean saveLabelOverlay,
                 boolean saveRois,
-                boolean saveMeasurements) {
+                boolean saveMeasurements,
+                boolean saveParameters) {
             this.inputModeIndex = inputModeIndex;
             this.sameFileSegChannelIndex1Based = sameFileSegChannelIndex1Based;
             this.sameFileFirstMeasChannelIndex1Based = sameFileFirstMeasChannelIndex1Based;
@@ -726,6 +732,7 @@ public final class BatchSegmentationDialog extends JDialog {
             this.saveLabelOverlay = saveLabelOverlay;
             this.saveRois = saveRois;
             this.saveMeasurements = saveMeasurements;
+            this.saveParameters = saveParameters;
         }
     }
 

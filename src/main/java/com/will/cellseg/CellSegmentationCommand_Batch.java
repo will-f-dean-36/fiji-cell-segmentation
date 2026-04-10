@@ -17,6 +17,7 @@ import ij.measure.ResultsTable;
 import ij.plugin.filter.Analyzer;
 import ij.plugin.frame.RoiManager;
 import java.io.File;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -123,6 +124,7 @@ public class CellSegmentationCommand_Batch implements Command {
     private boolean saveLabelOverlay = false;
     private boolean saveRois = true;
     private boolean saveMeasurements = true;
+    private boolean saveParameters = true;
 
     private boolean measureArea = true;
     private boolean measureMean = true;
@@ -173,7 +175,8 @@ public class CellSegmentationCommand_Batch implements Command {
                 saveLabels,
                 saveLabelOverlay,
                 saveRois,
-                saveMeasurements));
+                saveMeasurements,
+                saveParameters));
         if (options == null) {
             return;
         }
@@ -288,6 +291,7 @@ public class CellSegmentationCommand_Batch implements Command {
             int processedPairs = 0;
             int failedPairs = 0;
             int skippedPairs = 0;
+            final List<SegmentationParameterRow> parameterRows = new ArrayList<SegmentationParameterRow>();
 
             for (int i = 0; i < pairedUnits.size(); i++) {
                 final PairedUnit pair = pairedUnits.get(i);
@@ -379,6 +383,16 @@ public class CellSegmentationCommand_Batch implements Command {
                                 pairedUnits.size(),
                                 seg);
                         segmentationCache.put(segKey, finalSegmentation);
+                        if (saveParameters) {
+                            parameterRows.add(SegmentationParameterRow.from(
+                                    seg,
+                                    pairThresholdConfig,
+                                    edgeMethod,
+                                    minArea,
+                                    excludeBorderTouching,
+                                    finalSegmentation.action,
+                                    finalSegmentation.getRois() != null ? finalSegmentation.getRois().length : 0));
+                        }
 
                         if (finalSegmentation.isAbort()) {
                             aborted = true;
@@ -454,6 +468,14 @@ public class CellSegmentationCommand_Batch implements Command {
 
             IJ.showProgress(1.0);
             IJ.showStatus(aborted ? "Batch Cell Segmentation aborted." : "Batch Cell Segmentation complete.");
+            if (saveParameters && !parameterRows.isEmpty()) {
+                try {
+                    saveParameterRows(parameterRows, new File(outputDir, "segmentation_parameters.csv"));
+                } catch (Exception e) {
+                    IJ.log("[CellSegmentation Batch] ERROR saving segmentation parameters: " + e.getMessage());
+                    IJ.handleException(e);
+                }
+            }
             IJ.log("[CellSegmentation Batch] Done. processedPairs=" + processedPairs
                     + " failedPairs=" + failedPairs
                     + " skippedPairs=" + skippedPairs
@@ -602,6 +624,7 @@ public class CellSegmentationCommand_Batch implements Command {
         saveLabelOverlay = options.saveLabelOverlay;
         saveRois = options.saveRois;
         saveMeasurements = options.saveMeasurements;
+        saveParameters = options.saveParameters;
     }
 
     private static int inputModeToIndex(String modeName) {
@@ -660,6 +683,18 @@ public class CellSegmentationCommand_Batch implements Command {
 
     private static void saveRois(Roi[] rois, File out) {
         CellSegmentationIO.saveRois(rois, out);
+    }
+
+    private static void saveParameterRows(List<SegmentationParameterRow> rows, File out) throws Exception {
+        final PrintWriter writer = new PrintWriter(out, "UTF-8");
+        try {
+            writer.println("source_path,source_file,series_index_1based,seg_channel_index_1based,threshold_mode,threshold_method,dark_objects,threshold_min,threshold_max,edge_method,min_area_px,exclude_border_touching,roi_review_action,accepted_roi_count");
+            for (SegmentationParameterRow row : rows) {
+                writer.println(row.toCsv());
+            }
+        } finally {
+            writer.close();
+        }
     }
 
     private static void closeImage(ImagePlus imp) {
@@ -948,6 +983,102 @@ public class CellSegmentationCommand_Batch implements Command {
 
         private boolean shouldRememberThreshold() {
             return rememberThreshold;
+        }
+    }
+
+    private static final class SegmentationParameterRow {
+        private final String sourcePath;
+        private final String sourceFile;
+        private final int seriesIndex1Based;
+        private final int segChannelIndex1Based;
+        private final String thresholdMode;
+        private final String thresholdMethod;
+        private final boolean darkObjects;
+        private final String thresholdMin;
+        private final String thresholdMax;
+        private final String edgeMethod;
+        private final int minArea;
+        private final boolean excludeBorderTouching;
+        private final String roiReviewAction;
+        private final int acceptedRoiCount;
+
+        private SegmentationParameterRow(
+                String sourcePath,
+                String sourceFile,
+                int seriesIndex1Based,
+                int segChannelIndex1Based,
+                String thresholdMode,
+                String thresholdMethod,
+                boolean darkObjects,
+                String thresholdMin,
+                String thresholdMax,
+                String edgeMethod,
+                int minArea,
+                boolean excludeBorderTouching,
+                String roiReviewAction,
+                int acceptedRoiCount) {
+            this.sourcePath = sourcePath;
+            this.sourceFile = sourceFile;
+            this.seriesIndex1Based = seriesIndex1Based;
+            this.segChannelIndex1Based = segChannelIndex1Based;
+            this.thresholdMode = thresholdMode;
+            this.thresholdMethod = thresholdMethod;
+            this.darkObjects = darkObjects;
+            this.thresholdMin = thresholdMin;
+            this.thresholdMax = thresholdMax;
+            this.edgeMethod = edgeMethod;
+            this.minArea = minArea;
+            this.excludeBorderTouching = excludeBorderTouching;
+            this.roiReviewAction = roiReviewAction;
+            this.acceptedRoiCount = acceptedRoiCount;
+        }
+
+        private static SegmentationParameterRow from(
+                SegUnit seg,
+                ThresholdConfig thresholdConfig,
+                String edgeMethod,
+                int minArea,
+                boolean excludeBorderTouching,
+                BatchStopController.RoiReviewAction roiReviewAction,
+                int acceptedRoiCount) {
+            final ThresholdConfig cfg = thresholdConfig != null ? thresholdConfig : ThresholdConfig.auto("Default", true);
+            return new SegmentationParameterRow(
+                    seg.getSource().getAbsolutePath(),
+                    seg.getSource().getName(),
+                    seg.getSeriesIndex() + 1,
+                    seg.getSegChannelIndex() + 1,
+                    cfg.isManual() ? "manual" : "auto",
+                    cfg.getMethod(),
+                    cfg.isDarkObjects(),
+                    cfg.isManual() ? Double.toString(cfg.getMinThreshold()) : "",
+                    cfg.isManual() ? Double.toString(cfg.getMaxThreshold()) : "",
+                    edgeMethod,
+                    minArea,
+                    excludeBorderTouching,
+                    roiReviewAction != null ? roiReviewAction.name() : "",
+                    acceptedRoiCount);
+        }
+
+        private String toCsv() {
+            return csv(sourcePath) + ","
+                    + csv(sourceFile) + ","
+                    + seriesIndex1Based + ","
+                    + segChannelIndex1Based + ","
+                    + csv(thresholdMode) + ","
+                    + csv(thresholdMethod) + ","
+                    + darkObjects + ","
+                    + csv(thresholdMin) + ","
+                    + csv(thresholdMax) + ","
+                    + csv(edgeMethod) + ","
+                    + minArea + ","
+                    + excludeBorderTouching + ","
+                    + csv(roiReviewAction) + ","
+                    + acceptedRoiCount;
+        }
+
+        private static String csv(String value) {
+            final String safe = value != null ? value : "";
+            return "\"" + safe.replace("\"", "\"\"") + "\"";
         }
     }
 }
