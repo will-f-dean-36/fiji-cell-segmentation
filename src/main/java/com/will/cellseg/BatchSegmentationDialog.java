@@ -4,12 +4,16 @@ import ij.IJ;
 import ij.Prefs;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
+import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
@@ -108,6 +112,7 @@ public final class BatchSegmentationDialog extends JDialog {
     private final JComboBox<String> edgeMethodBox;
     private final JSpinner minAreaSpinner;
     private final JComboBox<String> excludeBorderBox;
+    private final JComboBox<String> watershedBox;
 
     private final JComboBox<String> thresholdReviewBox;
     private final JComboBox<String> roiReviewBox;
@@ -146,8 +151,8 @@ public final class BatchSegmentationDialog extends JDialog {
         inputModeBox.setSelectedIndex(initial.inputModeIndex);
         segChannelSpinner = new JSpinner(new SpinnerNumberModel(initial.sameFileSegChannelIndex1Based, 1, Integer.MAX_VALUE, 1));
         firstMeasChannelSpinner = new JSpinner(new SpinnerNumberModel(initial.sameFileFirstMeasChannelIndex1Based, 1, Integer.MAX_VALUE, 1));
-        segChannelLabel = new JLabel("Mode 3 RICM channel");
-        firstMeasChannelLabel = new JLabel("Mode 3 first fluorescence channel");
+        segChannelLabel = new JLabel("Mode 5 RICM channel");
+        firstMeasChannelLabel = new JLabel("Mode 5 first fluorescence channel");
         ricmOnlyContainerFile = null;
         ricmOnlyFiles = null;
         ricmContainerFile = initial.ricmContainerFile;
@@ -180,6 +185,8 @@ public final class BatchSegmentationDialog extends JDialog {
         minAreaSpinner = new JSpinner(new SpinnerNumberModel(initial.minArea, 0, Integer.MAX_VALUE, 1));
         excludeBorderBox = new JComboBox<String>(YES_NO);
         excludeBorderBox.setSelectedItem(initial.excludeBorderTouching ? "Yes" : "No");
+        watershedBox = new JComboBox<String>(YES_NO);
+        watershedBox.setSelectedItem(initial.watershed ? "Yes" : "No");
 
         thresholdReviewBox = new JComboBox<String>(YES_NO);
         thresholdReviewBox.setSelectedItem(initial.thresholdStopMode);
@@ -209,10 +216,8 @@ public final class BatchSegmentationDialog extends JDialog {
 
         final JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Inputs", buildInputsPanel());
-        tabs.addTab("Segmentation", buildSegmentationPanel());
-        tabs.addTab("Review", buildBatchPanel());
-        tabs.addTab("Measurements", buildMeasurementPanel());
-        tabs.addTab("Save", buildSavePanel());
+        tabs.addTab("General", buildSegmentationPanel(true));
+        tabs.addTab("Advanced", buildAdvancedPanel());
         add(tabs, BorderLayout.CENTER);
 
         final JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
@@ -280,7 +285,7 @@ public final class BatchSegmentationDialog extends JDialog {
         return panel;
     }
 
-    private JPanel buildSegmentationPanel() {
+    private JPanel buildSegmentationPanel(boolean includeGlue) {
         final JPanel panel = createFormPanel();
         int row = 0;
         DialogFormUtils.addRow(panel, row++, new JLabel("Auto-threshold method"), thresholdMethodBox);
@@ -288,20 +293,52 @@ public final class BatchSegmentationDialog extends JDialog {
         DialogFormUtils.addRow(panel, row++, new JLabel("Edge method"), edgeMethodBox);
         DialogFormUtils.addRow(panel, row++, new JLabel("Min cell area (px)"), minAreaSpinner);
         DialogFormUtils.addRow(panel, row++, new JLabel("Exclude border-touching cells"), excludeBorderBox);
-        DialogFormUtils.addVerticalGlue(panel, row);
+        DialogFormUtils.addRow(panel, row++, new JLabel("Attempt to separate touching cells (watershed)"), watershedBox);
+        if (includeGlue) {
+            DialogFormUtils.addVerticalGlue(panel, row);
+        }
         return panel;
     }
 
-    private JPanel buildBatchPanel() {
+    private JScrollPane buildAdvancedPanel() {
+        final JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        panel.add(sectionPanel("Review", buildBatchPanel(false)));
+        panel.add(Box.createVerticalStrut(8));
+        panel.add(sectionPanel("Measurements", buildMeasurementPanel(false)));
+        panel.add(Box.createVerticalStrut(8));
+        panel.add(sectionPanel("Save", buildSavePanel(false)));
+        panel.add(Box.createVerticalGlue());
+
+        final JScrollPane scrollPane = new JScrollPane(panel);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.setPreferredSize(new Dimension(820, 380));
+        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        return scrollPane;
+    }
+
+    private JPanel sectionPanel(String title, JPanel content) {
+        final JPanel section = new JPanel(new BorderLayout());
+        section.setBorder(BorderFactory.createTitledBorder(title));
+        section.add(content, BorderLayout.CENTER);
+        section.setAlignmentX(Component.LEFT_ALIGNMENT);
+        section.setMaximumSize(new Dimension(Integer.MAX_VALUE, section.getPreferredSize().height));
+        return section;
+    }
+
+    private JPanel buildBatchPanel(boolean includeGlue) {
         final JPanel panel = createFormPanel();
         int row = 0;
         DialogFormUtils.addRow(panel, row++, new JLabel("Threshold Review"), thresholdReviewBox);
         DialogFormUtils.addRow(panel, row++, new JLabel("ROI Review"), roiReviewBox);
-        DialogFormUtils.addVerticalGlue(panel, row);
+        if (includeGlue) {
+            DialogFormUtils.addVerticalGlue(panel, row);
+        }
         return panel;
     }
 
-    private JPanel buildMeasurementPanel() {
+    private JPanel buildMeasurementPanel(boolean includeGlue) {
         final JPanel panel = createFormPanel();
         int row = 0;
         DialogFormUtils.addCheckRow(panel, row++, measureAreaBox);
@@ -314,11 +351,13 @@ public final class BatchSegmentationDialog extends JDialog {
         DialogFormUtils.addCheckRow(panel, row++, measureFeretBox);
         DialogFormUtils.addCheckRow(panel, row++, measureShapeBox);
         DialogFormUtils.addCheckRow(panel, row++, measureIntDenBox);
-        DialogFormUtils.addVerticalGlue(panel, row);
+        if (includeGlue) {
+            DialogFormUtils.addVerticalGlue(panel, row);
+        }
         return panel;
     }
 
-    private JPanel buildSavePanel() {
+    private JPanel buildSavePanel(boolean includeGlue) {
         final JPanel panel = createFormPanel();
         int row = 0;
         final JPanel dirPanel = new JPanel(new BorderLayout(6, 0));
@@ -334,7 +373,9 @@ public final class BatchSegmentationDialog extends JDialog {
         DialogFormUtils.addCheckRow(panel, row++, saveRoisBox);
         DialogFormUtils.addCheckRow(panel, row++, saveMeasurementsBox);
         DialogFormUtils.addCheckRow(panel, row++, saveParametersBox);
-        DialogFormUtils.addVerticalGlue(panel, row);
+        if (includeGlue) {
+            DialogFormUtils.addVerticalGlue(panel, row);
+        }
         return panel;
     }
 
@@ -400,6 +441,7 @@ public final class BatchSegmentationDialog extends JDialog {
                 "Dark".equals(objectPolarityBox.getSelectedItem()),
                 (String) edgeMethodBox.getSelectedItem(),
                 "Yes".equals(excludeBorderBox.getSelectedItem()),
+                "Yes".equals(watershedBox.getSelectedItem()),
                 (String) thresholdReviewBox.getSelectedItem(),
                 (String) roiReviewBox.getSelectedItem(),
                 measureAreaBox.isSelected(),
@@ -733,6 +775,7 @@ public final class BatchSegmentationDialog extends JDialog {
         final boolean darkObjects;
         final String edgeMethod;
         final boolean excludeBorderTouching;
+        final boolean watershed;
         final String thresholdStopMode;
         final String roiReviewMode;
         final boolean measureArea;
@@ -768,6 +811,7 @@ public final class BatchSegmentationDialog extends JDialog {
                 boolean darkObjects,
                 String edgeMethod,
                 boolean excludeBorderTouching,
+                boolean watershed,
                 String thresholdStopMode,
                 String roiReviewMode,
                 boolean measureArea,
@@ -801,6 +845,7 @@ public final class BatchSegmentationDialog extends JDialog {
             this.darkObjects = darkObjects;
             this.edgeMethod = edgeMethod;
             this.excludeBorderTouching = excludeBorderTouching;
+            this.watershed = watershed;
             this.thresholdStopMode = thresholdStopMode;
             this.roiReviewMode = roiReviewMode;
             this.measureArea = measureArea;

@@ -91,6 +91,10 @@
 
 	</properties>
 
+	<build>
+		<finalName>Cell_Segmentation-${project.version}</finalName>
+	</build>
+
 	<!-- Usually not needed: pom-scijava + Central covers most things.
          If you do need SciJava public, this is the canonical URL. -->
 	<repositories>

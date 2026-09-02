@@ -58,7 +58,7 @@ mvn clean package
 The built JAR will be written to:
 
 ```text
-target/cell-segmentation-<version>.jar
+target/Cell_Segmentation-<version>.jar
 ```
 
 Install that JAR into Fiji as described above.
@@ -73,8 +73,8 @@ The segmentation pipeline is:
 4. Threshold the gradient image
 5. Convert to mask
 6. Fill holes / close gaps
-7. Watershed
-8. Analyze particles to generate ROIs
+7. Optionally run watershed to separate touching cells
+8. Generate ROIs from 4-connected mask components
 9. Optionally exclude border-touching objects
 10. Optionally review ROIs interactively
 11. Measure accepted ROIs on the chosen measurement image
@@ -176,15 +176,12 @@ You must specify:
 
 ## Single-image Dialog
 
-The single-image dialog has five tabs:
+The single-image dialog has two tabs:
 
-- `Segmentation`
-- `Review`
-- `Display`
-- `Measurements`
-- `Save`
+- `General`
+- `Advanced`
 
-### Segmentation tab
+### General tab
 
 - `Auto-threshold method`
   - Fiji/ImageJ auto-threshold method applied to the normalized edge image unless a manual threshold is selected during review.
@@ -199,8 +196,15 @@ The single-image dialog has five tabs:
 - `Exclude border-touching cells`
   - `Yes`: remove any ROI touching the image border
   - `No`: keep border-touching ROIs
+- `Attempt to separate touching cells (watershed)`
+  - `Yes`: run ImageJ watershed before ROI generation
+  - `No`: skip watershed
 
-### Review tab
+### Advanced tab
+
+The advanced tab groups review, display, measurement, and save options into sections.
+
+#### Review
 
 - `Threshold Review`
   - `Yes`: stop after edge detection and before thresholding
@@ -217,6 +221,15 @@ If threshold review is enabled, the stop-point dialog supports:
 - `Remember threshold`
 
 If ROI review is enabled, the stop-point dialog supports:
+- `Split ROIs`
+  - draw a line across a single ROI, then click `Split`
+- `Merge ROIs`
+  - draw a line with endpoints inside two ROIs, then click `Merge`
+- `Delete ROIs`
+  - draw through ROIs or place point markers inside them, then click `Delete`
+- `Undo`
+- `Redo`
+- `Reset`
 - `Continue`
 - `Continue to end`
 - `Skip`
@@ -224,7 +237,7 @@ If ROI review is enabled, the stop-point dialog supports:
 
 For stacks, those review steps are applied slice-by-slice.
 
-### Display tab
+#### Display
 
 - `Show intermediate images`
   - show intermediate processing steps from the segmentation pipeline
@@ -241,7 +254,7 @@ For stacks, those review steps are applied slice-by-slice.
 - `Clear ROI Manager first`
   - clear the ROI Manager before adding final accepted ROIs
 
-### Measurements tab
+#### Measurements
 
 Available measurement toggles:
 - Area
@@ -257,7 +270,7 @@ Available measurement toggles:
 
 These are standard ImageJ measurements performed on the accepted ROIs.
 
-### Save tab
+#### Save
 
 - `Automatically save results`
   - enables saving to disk after the run
@@ -274,13 +287,11 @@ When auto-save is off, the individual save toggles are disabled.
 
 ## Batch Dialog
 
-The batch dialog has five tabs:
+The batch dialog has three tabs:
 
 - `Inputs`
-- `Segmentation`
-- `Review`
-- `Measurements`
-- `Save`
+- `General`
+- `Advanced`
 
 ### Inputs tab
 
@@ -308,7 +319,7 @@ Mode-specific inputs:
   - `Mode 5 RICM channel`
   - `Mode 5 first fluorescence channel`
 
-### Segmentation tab
+### General tab
 
 Same meaning as single-image mode:
 - `Auto-threshold method`
@@ -316,8 +327,13 @@ Same meaning as single-image mode:
 - `Edge method`
 - `Min cell area (px)`
 - `Exclude border-touching cells`
+- `Attempt to separate touching cells (watershed)`
 
-### Review tab
+### Advanced tab
+
+The advanced tab groups review, measurement, and save options into sections.
+
+#### Review
 
 - `Threshold Review`
   - `Yes`: stop once per unique RICM segmentation source
@@ -330,8 +346,9 @@ Behavior notes:
 - `Continue to end` for threshold review only disables future threshold review stops
 - `Continue to end` for ROI review only disables future ROI review stops
 - these two review streams are independent
+- batch ROI review uses the same split, merge, delete, undo, redo, and reset tools as single-image mode
 
-### Measurements tab
+#### Measurements
 
 Same measurement toggles as single-image mode.
 
@@ -339,7 +356,7 @@ For batch mode:
 - in Modes 1-2, measurements are performed on the RICM segmentation image/series itself
 - in Modes 3-5, measurements are performed on the paired fluorescence image(s) or fluorescence channels
 
-### Save tab
+#### Save
 
 - `Output directory`
 - `Labels LUT`

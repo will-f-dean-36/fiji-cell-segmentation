@@ -3,12 +3,13 @@ package com.will.cellseg;
 import ij.IJ;
 import ij.ImagePlus;
 import ij.WindowManager;
+import ij.gui.PolygonRoi;
 import ij.gui.Roi;
+import ij.gui.Wand;
 import ij.CompositeImage;
 import ij.measure.ResultsTable;
 import ij.plugin.Duplicator;
 import ij.plugin.filter.Analyzer;
-import ij.plugin.filter.ParticleAnalyzer;
 import ij.plugin.frame.RoiManager;
 import ij.process.FloatProcessor;
 import ij.process.ImageProcessor;
@@ -20,6 +21,7 @@ import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
+import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.WindowAdapter;
@@ -207,12 +209,15 @@ public final class CellSegmentationPipeline {
         // Show Edge Mask Filled
         showStepSnapshot(work, "3 - Edge Mask Filled", p.showSteps);
 
-        // 4) Watershed
-        IJ.run(work, "Watershed", "");
-        // Show Watershed
-        showStepSnapshot(work, "4 - Watershed", p.showSteps);
+        // 4) Optional Watershed
+        if (p.watershed) {
+            IJ.run(work, "Watershed", "");
+            showStepSnapshot(work, "4 - Watershed", p.showSteps);
+        } else {
+            showStepSnapshot(work, "4 - Watershed Skipped", p.showSteps);
+        }
 
-        // Preserve the raw post-watershed mask as an optional intermediate view. This
+        // Preserve the raw post-processing mask as an optional intermediate view. This
         // still includes components that may later be filtered out by min-area.
         showStepSnapshot(work, "5 - Pre-Label Mask", p.showSteps);
 
@@ -524,19 +529,7 @@ public final class CellSegmentationPipeline {
         // ResultsTable for the final measurement pass (on the original image).
         ResultsTable rt = new ResultsTable();
 
-        int paOptions = ParticleAnalyzer.ADD_TO_MANAGER;
-
-        // NOTE: setRoiManager is static in IJ1 -> call it statically
-        ParticleAnalyzer.setRoiManager(rm);
-
-        // Use ParticleAnalyzer only to populate the ROI Manager (skip its measurements).
-        ResultsTable dummyRt = new ResultsTable();
-        // minArea auto-widens int -> double; no cast needed
-        ParticleAnalyzer pa = new ParticleAnalyzer(paOptions, 0, dummyRt, minArea, Double.POSITIVE_INFINITY);
-        if (binaryMask != null && binaryMask.getWindow() != null) {
-            WindowManager.setCurrentWindow(binaryMask.getWindow());
-        }
-        pa.analyze(binaryMask);
+        addFourConnectedMaskRois(binaryMask, rm, minArea);
 
         if (excludeBorderTouching) {
             filterBorderTouchingRois(rm, binaryMask.getWidth(), binaryMask.getHeight());
@@ -558,6 +551,52 @@ public final class CellSegmentationPipeline {
         }
 
         return new AnalysisResult(rm, rt);
+    }
+
+    private static void addFourConnectedMaskRois(ImagePlus binaryMask, RoiManager roiManager, int minArea) {
+        if (binaryMask == null || roiManager == null) {
+            return;
+        }
+
+        final int width = binaryMask.getWidth();
+        final int height = binaryMask.getHeight();
+        final ByteProcessor bp = binaryMask.getProcessor().convertToByteProcessor();
+        final byte[] pix = (byte[]) bp.getPixels();
+        final List<ConnectedComponents.Component> components =
+                ConnectedComponents.findForegroundComponents(pix, width, height, false);
+
+        for (ConnectedComponents.Component component : components) {
+            if (component == null || component.area() < minArea) {
+                continue;
+            }
+            final Roi roi = componentToRoi(component, width, height);
+            if (roi != null) {
+                roiManager.addRoi(roi);
+            }
+        }
+    }
+
+    private static Roi componentToRoi(ConnectedComponents.Component component, int width, int height) {
+        if (component == null || component.pixels == null || component.pixels.length == 0) {
+            return null;
+        }
+
+        final byte[] componentPixels = new byte[width * height];
+        for (int idx : component.pixels) {
+            componentPixels[idx] = (byte) 255;
+        }
+
+        final ImageProcessor componentIp = new ByteProcessor(width, height, componentPixels, null);
+        final int seed = component.pixels[0];
+        final int seedY = seed / width;
+        final int seedX = seed - seedY * width;
+        final Wand wand = new Wand(componentIp);
+        wand.autoOutline(seedX, seedY, 255, 255, Wand.FOUR_CONNECTED);
+        if (wand.npoints < 3) {
+            final ConnectedComponents.Stats stats = component.stats;
+            return new Roi(stats.minX, stats.minY, stats.width(), stats.height());
+        }
+        return new PolygonRoi(new Polygon(wand.xpoints, wand.ypoints, wand.npoints), Roi.TRACED_ROI);
     }
 
     private static void filterBorderTouchingRois(RoiManager roiManager, int width, int height) {

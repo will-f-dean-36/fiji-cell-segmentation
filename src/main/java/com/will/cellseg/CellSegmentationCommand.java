@@ -36,6 +36,7 @@ public class CellSegmentationCommand implements Command {
     private String labelsLut = "Rainbow RGB";
     private boolean clearRM = true;
     private boolean excludeBorderTouching = false;
+    private boolean watershed = false;
     private boolean autoSave = false;
     private File outputDir = CellSegmentationIO.getDefaultOutputDirectory();
     private boolean saveMask = true;
@@ -80,6 +81,7 @@ public class CellSegmentationCommand implements Command {
                         thresholdReview,
                         edgeMethod,
                         excludeBorderTouching,
+                        watershed,
                         roiReview,
                         showSteps,
                         showMask,
@@ -160,7 +162,7 @@ public class CellSegmentationCommand implements Command {
         if (showMask && sliceResult.mask != null) sliceResult.mask.show();
         if (showLabels && sliceResult.labels != null) sliceResult.labels.show();
         if (showLabelOverlay && sliceResult.labelOverlay != null) sliceResult.labelOverlay.show();
-        if (sliceResult.resultsTable != null) sliceResult.resultsTable.show("Results");
+        if (measurements != 0 && sliceResult.resultsTable != null) sliceResult.resultsTable.show("Results");
         if (showRoiOverlay) {
             final List<Roi> rois = new ArrayList<Roi>();
             for (Roi roi : sliceResult.rois) {
@@ -284,7 +286,9 @@ public class CellSegmentationCommand implements Command {
         }
 
         if (combinedResults.getCounter() > 0) {
-            combinedResults.show("Results");
+            if (measurements != 0) {
+                combinedResults.show("Results");
+            }
         }
         if (showRoiOverlay) {
             applyRoisToSourceStack(allRois);
@@ -365,6 +369,7 @@ public class CellSegmentationCommand implements Command {
                         false,
                         false,
                         excludeBorderTouching,
+                        watershed,
                         EdgeDetector.fromLabel(edgeMethod),
                         measurements,
                         labelsLut,
@@ -381,8 +386,7 @@ public class CellSegmentationCommand implements Command {
                 Roi[] finalRois = runResult.roiManager != null ? cloneRois(runResult.roiManager.getRoisAsArray()) : new Roi[0];
 
                 if (roiReview && !reviewState.roiReviewDisabled) {
-                    final BatchStopController.RoiReviewResult reviewed = stopController.maybeReviewRois(
-                            null,
+                    final BatchStopController.RoiReviewResult reviewed = RoiReviewEditor.review(
                             sliceImp,
                             finalRois,
                             "ROI Review: " + title);
@@ -628,6 +632,7 @@ public class CellSegmentationCommand implements Command {
         table.setValue("threshold_min", row, cfg.isManual() ? cfg.getMinThreshold() : Double.NaN);
         table.setValue("threshold_max", row, cfg.isManual() ? cfg.getMaxThreshold() : Double.NaN);
         table.setValue("edge_method", row, edgeMethod);
+        table.setValue("watershed", row, watershed ? 1 : 0);
         table.setValue("min_area_px", row, minArea);
         table.setValue("exclude_border_touching", row, excludeBorderTouching ? 1 : 0);
         table.setValue("roi_review_action", row, roiReview ? "CONTINUE" : "");
@@ -637,7 +642,7 @@ public class CellSegmentationCommand implements Command {
 
     private static ResultsTable measureRoisOnImage(Roi[] rois, ImagePlus image, int measurements) {
         final ResultsTable rt = new ResultsTable();
-        if (image == null) {
+        if (image == null || measurements == 0) {
             return rt;
         }
         final Analyzer analyzer = new Analyzer(image, measurements, rt);
@@ -688,6 +693,7 @@ public class CellSegmentationCommand implements Command {
         thresholdReview = options.thresholdReview;
         edgeMethod = options.edgeMethod;
         excludeBorderTouching = options.excludeBorderTouching;
+        watershed = options.watershed;
         roiReview = options.roiReview;
         showSteps = options.showSteps;
         showMask = options.showMask;
@@ -728,10 +734,6 @@ public class CellSegmentationCommand implements Command {
         if (measureFeret) meas |= ij.measure.Measurements.FERET;
         if (measureShape) meas |= ij.measure.Measurements.SHAPE_DESCRIPTORS;
         if (measureIntDen) meas |= ij.measure.Measurements.INTEGRATED_DENSITY;
-        if (meas == 0) {
-            meas = ij.measure.Measurements.AREA;
-            IJ.log("[CellSegmentation] No measurements selected; defaulting to Area.");
-        }
         return meas;
     }
 

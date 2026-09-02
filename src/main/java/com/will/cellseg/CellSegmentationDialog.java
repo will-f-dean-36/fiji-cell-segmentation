@@ -3,13 +3,19 @@ package com.will.cellseg;
 import ij.IJ;
 import ij.ImagePlus;
 import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Frame;
+import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
@@ -17,6 +23,7 @@ import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextField;
@@ -70,6 +77,7 @@ public final class CellSegmentationDialog extends JDialog {
     private final JComboBox<String> edgeMethodBox;
     private final JSpinner minAreaSpinner;
     private final JComboBox<String> excludeBorderBox;
+    private final JComboBox<String> watershedBox;
 
     private final JComboBox<String> thresholdReviewBox;
     private final JComboBox<String> roiReviewBox;
@@ -121,6 +129,8 @@ public final class CellSegmentationDialog extends JDialog {
         minAreaSpinner = new JSpinner(new SpinnerNumberModel(initial.minArea, 0, Integer.MAX_VALUE, 1));
         excludeBorderBox = new JComboBox<String>(YES_NO);
         excludeBorderBox.setSelectedItem(initial.excludeBorderTouching ? "Yes" : "No");
+        watershedBox = new JComboBox<String>(YES_NO);
+        watershedBox.setSelectedItem(initial.watershed ? "Yes" : "No");
         thresholdReviewBox = new JComboBox<String>(YES_NO);
         thresholdReviewBox.setSelectedItem(initial.thresholdReview ? "Yes" : "No");
         roiReviewBox = new JComboBox<String>(YES_NO);
@@ -156,11 +166,8 @@ public final class CellSegmentationDialog extends JDialog {
         saveParametersBox = new JCheckBox("Save segmentation parameters (CSV)", initial.saveParameters);
 
         final JTabbedPane tabs = new JTabbedPane();
-        tabs.addTab("Segmentation", buildSegmentationPanel());
-        tabs.addTab("Review", buildReviewPanel());
-        tabs.addTab("Display", buildDisplayPanel());
-        tabs.addTab("Measurements", buildMeasurementPanel());
-        tabs.addTab("Save", buildSavePanel());
+        tabs.addTab("General", buildSegmentationPanel(true));
+        tabs.addTab("Advanced", buildAdvancedPanel());
         add(tabs, BorderLayout.CENTER);
 
         final JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
@@ -180,8 +187,11 @@ public final class CellSegmentationDialog extends JDialog {
         updateSaveEnabled();
 
         pack();
-        setSize(Math.max(650, getWidth()), Math.max(520, getHeight()));
-        setLocationRelativeTo(null);
+        final Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        final int dialogWidth = Math.max(650, getWidth());
+        final int dialogHeight = Math.min(Math.max(360, getHeight()), Math.max(360, screen.height - 220));
+        setSize(new Dimension(dialogWidth, dialogHeight));
+        positionLeftOfImage(imp);
     }
 
     static Result showDialog(ImagePlus imp, Result initial) {
@@ -212,7 +222,7 @@ public final class CellSegmentationDialog extends JDialog {
         return out.get();
     }
 
-    private JPanel buildSegmentationPanel() {
+    private JPanel buildSegmentationPanel(boolean includeGlue) {
         final JPanel panel = createFormPanel();
         int row = 0;
         DialogFormUtils.addRow(panel, row++, new JLabel("Auto-threshold method"), thresholdMethodBox);
@@ -220,20 +230,54 @@ public final class CellSegmentationDialog extends JDialog {
         DialogFormUtils.addRow(panel, row++, new JLabel("Edge method"), edgeMethodBox);
         DialogFormUtils.addRow(panel, row++, new JLabel("Min cell area (px)"), minAreaSpinner);
         DialogFormUtils.addRow(panel, row++, new JLabel("Exclude border-touching cells"), excludeBorderBox);
-        DialogFormUtils.addVerticalGlue(panel, row);
+        DialogFormUtils.addRow(panel, row++, new JLabel("Attempt to separate touching cells (watershed)"), watershedBox);
+        if (includeGlue) {
+            DialogFormUtils.addVerticalGlue(panel, row);
+        }
         return panel;
     }
 
-    private JPanel buildReviewPanel() {
+    private JScrollPane buildAdvancedPanel() {
+        final JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        panel.add(sectionPanel("Review", buildReviewPanel(false)));
+        panel.add(Box.createVerticalStrut(8));
+        panel.add(sectionPanel("Display", buildDisplayPanel(false)));
+        panel.add(Box.createVerticalStrut(8));
+        panel.add(sectionPanel("Measurements", buildMeasurementPanel(false)));
+        panel.add(Box.createVerticalStrut(8));
+        panel.add(sectionPanel("Save", buildSavePanel(false)));
+        panel.add(Box.createVerticalGlue());
+
+        final JScrollPane scrollPane = new JScrollPane(panel);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.setPreferredSize(new Dimension(620, 300));
+        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        return scrollPane;
+    }
+
+    private JPanel sectionPanel(String title, JPanel content) {
+        final JPanel section = new JPanel(new BorderLayout());
+        section.setBorder(BorderFactory.createTitledBorder(title));
+        section.add(content, BorderLayout.CENTER);
+        section.setAlignmentX(Component.LEFT_ALIGNMENT);
+        section.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, section.getPreferredSize().height));
+        return section;
+    }
+
+    private JPanel buildReviewPanel(boolean includeGlue) {
         final JPanel panel = createFormPanel();
         int row = 0;
         DialogFormUtils.addRow(panel, row++, new JLabel("Threshold Review"), thresholdReviewBox);
         DialogFormUtils.addRow(panel, row++, new JLabel("ROI Review"), roiReviewBox);
-        DialogFormUtils.addVerticalGlue(panel, row);
+        if (includeGlue) {
+            DialogFormUtils.addVerticalGlue(panel, row);
+        }
         return panel;
     }
 
-    private JPanel buildDisplayPanel() {
+    private JPanel buildDisplayPanel(boolean includeGlue) {
         final JPanel panel = createFormPanel();
         int row = 0;
         DialogFormUtils.addCheckRow(panel, row++, showStepsBox);
@@ -243,11 +287,13 @@ public final class CellSegmentationDialog extends JDialog {
         DialogFormUtils.addCheckRow(panel, row++, showOverlayBox);
         DialogFormUtils.addRow(panel, row++, new JLabel("Labels LUT"), labelsLutBox);
         DialogFormUtils.addCheckRow(panel, row++, clearRmBox);
-        DialogFormUtils.addVerticalGlue(panel, row);
+        if (includeGlue) {
+            DialogFormUtils.addVerticalGlue(panel, row);
+        }
         return panel;
     }
 
-    private JPanel buildMeasurementPanel() {
+    private JPanel buildMeasurementPanel(boolean includeGlue) {
         final JPanel panel = createFormPanel();
         int row = 0;
         DialogFormUtils.addCheckRow(panel, row++, measureAreaBox);
@@ -260,11 +306,13 @@ public final class CellSegmentationDialog extends JDialog {
         DialogFormUtils.addCheckRow(panel, row++, measureFeretBox);
         DialogFormUtils.addCheckRow(panel, row++, measureShapeBox);
         DialogFormUtils.addCheckRow(panel, row++, measureIntDenBox);
-        DialogFormUtils.addVerticalGlue(panel, row);
+        if (includeGlue) {
+            DialogFormUtils.addVerticalGlue(panel, row);
+        }
         return panel;
     }
 
-    private JPanel buildSavePanel() {
+    private JPanel buildSavePanel(boolean includeGlue) {
         final JPanel panel = createFormPanel();
         int row = 0;
         DialogFormUtils.addCheckRow(panel, row++, autoSaveBox);
@@ -282,7 +330,9 @@ public final class CellSegmentationDialog extends JDialog {
         DialogFormUtils.addCheckRow(panel, row++, saveRoisBox);
         DialogFormUtils.addCheckRow(panel, row++, saveMeasurementsBox);
         DialogFormUtils.addCheckRow(panel, row++, saveParametersBox);
-        DialogFormUtils.addVerticalGlue(panel, row);
+        if (includeGlue) {
+            DialogFormUtils.addVerticalGlue(panel, row);
+        }
         return panel;
     }
 
@@ -297,6 +347,25 @@ public final class CellSegmentationDialog extends JDialog {
         if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION && chooser.getSelectedFile() != null) {
             outputDirField.setText(chooser.getSelectedFile().getAbsolutePath());
         }
+    }
+
+    private void positionLeftOfImage(ImagePlus image) {
+        final Rectangle bounds = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        if (image != null && image.getWindow() != null) {
+            final int gap = 16;
+            int x = image.getWindow().getX() - getWidth() - gap;
+            if (x < bounds.x) {
+                x = image.getWindow().getX() + image.getWindow().getWidth() + gap;
+            }
+            if (x + getWidth() <= bounds.x + bounds.width) {
+                final int y = Math.max(bounds.y, Math.min(image.getWindow().getY(),
+                        bounds.y + bounds.height - getHeight()));
+                setLocation(x, y);
+                return;
+            }
+        }
+
+        setLocationRelativeTo(null);
     }
 
     private void updateSaveEnabled() {
@@ -324,6 +393,7 @@ public final class CellSegmentationDialog extends JDialog {
                 "Yes".equals(thresholdReviewBox.getSelectedItem()),
                 (String) edgeMethodBox.getSelectedItem(),
                 "Yes".equals(excludeBorderBox.getSelectedItem()),
+                "Yes".equals(watershedBox.getSelectedItem()),
                 "Yes".equals(roiReviewBox.getSelectedItem()),
                 showStepsBox.isSelected(),
                 showMaskBox.isSelected(),
@@ -365,6 +435,7 @@ public final class CellSegmentationDialog extends JDialog {
         final boolean thresholdReview;
         final String edgeMethod;
         final boolean excludeBorderTouching;
+        final boolean watershed;
         final boolean roiReview;
         final boolean showSteps;
         final boolean showMask;
@@ -399,6 +470,7 @@ public final class CellSegmentationDialog extends JDialog {
                 boolean thresholdReview,
                 String edgeMethod,
                 boolean excludeBorderTouching,
+                boolean watershed,
                 boolean roiReview,
                 boolean showSteps,
                 boolean showMask,
@@ -431,6 +503,7 @@ public final class CellSegmentationDialog extends JDialog {
             this.thresholdReview = thresholdReview;
             this.edgeMethod = edgeMethod;
             this.excludeBorderTouching = excludeBorderTouching;
+            this.watershed = watershed;
             this.roiReview = roiReview;
             this.showSteps = showSteps;
             this.showMask = showMask;

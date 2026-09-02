@@ -12,6 +12,7 @@ import java.awt.FlowLayout;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
+import java.awt.Window;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.concurrent.CountDownLatch;
@@ -136,6 +137,10 @@ public final class BatchStopController {
                         continueRun.run();
                     }
                 });
+                dialog.pack();
+                dialog.setSize(new Dimension(Math.max(380, dialog.getWidth()), Math.max(150, dialog.getHeight())));
+                positionDialogNearImage(dialog, ricmPreview, true);
+                positionWindowBelowDialog(findThresholdWindow(), dialog);
                 dialog.setVisible(true);
             }
         });
@@ -258,6 +263,10 @@ public final class BatchStopController {
                         continueRun.run();
                     }
                 });
+                dialog.pack();
+                dialog.setSize(new Dimension(Math.max(380, dialog.getWidth()), Math.max(150, dialog.getHeight())));
+                positionDialogNearImage(dialog, reviewImp, false);
+                positionWindowBelowDialog(roiManager, dialog);
                 dialog.setVisible(true);
             }
         });
@@ -287,18 +296,76 @@ public final class BatchStopController {
         label.setBorder(new EmptyBorder(12, 16, 4, 16));
         dialog.add(label, BorderLayout.NORTH);
         dialog.setAlwaysOnTop(alwaysOnTop);
-        dialog.pack();
-        final Dimension size = dialog.getSize();
-        dialog.setSize(new Dimension(Math.max(380, size.width), Math.max(150, size.height)));
-        centerOnScreen(dialog);
         return dialog;
     }
 
-    private static void centerOnScreen(JDialog dialog) {
+    private static void positionDialogNearImage(JDialog dialog, ImagePlus image, boolean preferRight) {
+        final Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        if (image != null && image.getWindow() != null) {
+            final Window imageWindow = image.getWindow();
+            final int gap = 16;
+            final int preferredX = preferRight
+                    ? imageWindow.getX() + imageWindow.getWidth() + gap
+                    : imageWindow.getX() - dialog.getWidth() - gap;
+            final int fallbackX = preferRight
+                    ? imageWindow.getX() - dialog.getWidth() - gap
+                    : imageWindow.getX() + imageWindow.getWidth() + gap;
+            int x = preferredX;
+            if (x < screen.x || x + dialog.getWidth() > screen.x + screen.width) {
+                x = fallbackX;
+            }
+            if (x + dialog.getWidth() <= screen.x + screen.width) {
+                final int y = Math.max(screen.y, Math.min(imageWindow.getY(),
+                        screen.y + screen.height - dialog.getHeight()));
+                dialog.setLocation(x, y);
+                return;
+            }
+        }
+
         final Rectangle bounds = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
         final int x = bounds.x + Math.max(0, (bounds.width - dialog.getWidth()) / 2);
         final int y = bounds.y + Math.max(0, (bounds.height - dialog.getHeight()) / 2);
         dialog.setLocation(x, y);
+    }
+
+    private static Window findThresholdWindow() {
+        final Window[] windows = WindowManager.getAllNonImageWindows();
+        if (windows == null) {
+            return null;
+        }
+        for (Window window : windows) {
+            if (window == null || !window.isVisible()) {
+                continue;
+            }
+            final String title = window instanceof Frame ? ((Frame) window).getTitle() : "";
+            if (title != null && title.toLowerCase().contains("threshold")) {
+                return window;
+            }
+            final String className = window.getClass().getName().toLowerCase();
+            if (className.contains("threshold")) {
+                return window;
+            }
+        }
+        return null;
+    }
+
+    private static void positionWindowBelowDialog(Window window, JDialog dialog) {
+        if (window == null || dialog == null) {
+            return;
+        }
+        final Rectangle bounds = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        final int gap = 12;
+        int x = dialog.getX();
+        int y = dialog.getY() + dialog.getHeight() + gap;
+        if (x + window.getWidth() > bounds.x + bounds.width) {
+            x = bounds.x + bounds.width - window.getWidth();
+        }
+        if (y + window.getHeight() > bounds.y + bounds.height) {
+            y = dialog.getY() - window.getHeight() - gap;
+        }
+        x = Math.max(bounds.x, x);
+        y = Math.max(bounds.y, Math.min(y, bounds.y + bounds.height - window.getHeight()));
+        window.setLocation(x, y);
     }
 
     private static JPanel buttonPanel(JButton... buttons) {

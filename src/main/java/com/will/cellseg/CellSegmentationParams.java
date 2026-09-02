@@ -11,6 +11,7 @@ public final class CellSegmentationParams {
     public final boolean showRoiOverlay;
     public final boolean clearRM;
     public final boolean excludeBorderTouching;
+    public final boolean watershed;
     public final EdgeDetector edgeDetector;
     public final int measurements;
     public final String labelsLut;
@@ -27,6 +28,7 @@ public final class CellSegmentationParams {
             boolean showRoiOverlay,
             boolean clearRM,
             boolean excludeBorderTouching,
+            boolean watershed,
             EdgeDetector edgeDetector,
             int measurements,
             String labelsLut,
@@ -42,6 +44,7 @@ public final class CellSegmentationParams {
         this.showRoiOverlay = showRoiOverlay;
         this.clearRM = clearRM;
         this.excludeBorderTouching = excludeBorderTouching;
+        this.watershed = watershed;
         this.edgeDetector = edgeDetector;
         this.measurements = measurements;
         this.labelsLut = labelsLut;

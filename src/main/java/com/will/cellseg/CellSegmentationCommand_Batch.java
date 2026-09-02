@@ -118,6 +118,7 @@ public class CellSegmentationCommand_Batch implements Command {
     private String edgeMethod = "Sobel (Gradient)";
     private String labelsLut = "Rainbow RGB";
     private boolean excludeBorderTouching = false;
+    private boolean watershed = false;
 
     private boolean saveMask = true;
     private boolean saveLabels = true;
@@ -157,6 +158,7 @@ public class CellSegmentationCommand_Batch implements Command {
                 darkObjects,
                 edgeMethod,
                 excludeBorderTouching,
+                watershed,
                 thresholdStopMode,
                 roiReviewMode,
                 measureArea,
@@ -272,6 +274,7 @@ public class CellSegmentationCommand_Batch implements Command {
                     false,
                     true,
                     excludeBorderTouching,
+                    watershed,
                     edgeDetector,
                     measurements,
                     labelsLut,
@@ -609,6 +612,7 @@ public class CellSegmentationCommand_Batch implements Command {
         darkObjects = options.darkObjects;
         edgeMethod = options.edgeMethod;
         excludeBorderTouching = options.excludeBorderTouching;
+        watershed = options.watershed;
         thresholdStopMode = options.thresholdStopMode;
         roiReviewMode = options.roiReviewMode;
         measureArea = options.measureArea;
@@ -811,8 +815,7 @@ public class CellSegmentationCommand_Batch implements Command {
             return CachedSegmentationResult.continueWith(proposedRois);
         }
 
-        final BatchStopController.RoiReviewResult reviewed = stopController.maybeReviewRois(
-                context,
+        final BatchStopController.RoiReviewResult reviewed = RoiReviewEditor.review(
                 segImp,
                 proposedRois,
                 buildRoiReviewTitle(pairIndex1, totalPairs, seg));

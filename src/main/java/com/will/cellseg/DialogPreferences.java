@@ -21,6 +21,7 @@ final class DialogPreferences {
                 Prefs.get(SINGLE_PREFIX + "thresholdReview", fallback.thresholdReview),
                 Prefs.get(SINGLE_PREFIX + "edgeMethod", fallback.edgeMethod),
                 Prefs.get(SINGLE_PREFIX + "excludeBorderTouching", fallback.excludeBorderTouching),
+                Prefs.get(SINGLE_PREFIX + "watershed", fallback.watershed),
                 Prefs.get(SINGLE_PREFIX + "roiReview", fallback.roiReview),
                 Prefs.get(SINGLE_PREFIX + "showSteps", fallback.showSteps),
                 Prefs.get(SINGLE_PREFIX + "showMask", fallback.showMask),
@@ -59,6 +60,7 @@ final class DialogPreferences {
         Prefs.set(SINGLE_PREFIX + "thresholdReview", result.thresholdReview);
         Prefs.set(SINGLE_PREFIX + "edgeMethod", result.edgeMethod);
         Prefs.set(SINGLE_PREFIX + "excludeBorderTouching", result.excludeBorderTouching);
+        Prefs.set(SINGLE_PREFIX + "watershed", result.watershed);
         Prefs.set(SINGLE_PREFIX + "roiReview", result.roiReview);
         Prefs.set(SINGLE_PREFIX + "showSteps", result.showSteps);
         Prefs.set(SINGLE_PREFIX + "showMask", result.showMask);
@@ -106,6 +108,7 @@ final class DialogPreferences {
                 Prefs.get(BATCH_PREFIX + "darkObjects", fallback.darkObjects),
                 Prefs.get(BATCH_PREFIX + "edgeMethod", fallback.edgeMethod),
                 Prefs.get(BATCH_PREFIX + "excludeBorderTouching", fallback.excludeBorderTouching),
+                Prefs.get(BATCH_PREFIX + "watershed", fallback.watershed),
                 Prefs.get(BATCH_PREFIX + "thresholdStopMode", fallback.thresholdStopMode),
                 Prefs.get(BATCH_PREFIX + "roiReviewMode", fallback.roiReviewMode),
                 Prefs.get(BATCH_PREFIX + "measureArea", fallback.measureArea),
@@ -140,6 +143,7 @@ final class DialogPreferences {
         Prefs.set(BATCH_PREFIX + "darkObjects", result.darkObjects);
         Prefs.set(BATCH_PREFIX + "edgeMethod", result.edgeMethod);
         Prefs.set(BATCH_PREFIX + "excludeBorderTouching", result.excludeBorderTouching);
+        Prefs.set(BATCH_PREFIX + "watershed", result.watershed);
         Prefs.set(BATCH_PREFIX + "thresholdStopMode", result.thresholdStopMode);
         Prefs.set(BATCH_PREFIX + "roiReviewMode", result.roiReviewMode);
         Prefs.set(BATCH_PREFIX + "measureArea", result.measureArea);
